@@ -1,0 +1,6 @@
+bloggers:
+  - user_id: "5986da286a6a692eaf2a53a1"
+    nickname: "一起自救"
+    homepage_url: "https://www.xiaohongshu.com/user/profile/5986da286a6a692eaf2a53a1"
+    notes:
+      max_count: 50
