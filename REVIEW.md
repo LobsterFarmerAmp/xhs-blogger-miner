@@ -426,8 +426,23 @@
   `_get_bool` 同理，对非法值给出明确提示。
 
 ### 待办
-- [ ] #23 `human_page_load` 异常分类处理
-- [ ] #24 `_blogger_index` 重复 user_id 警告
-- [ ] #25 `_get_int`/`_get_bool` 错误上下文
+- [x] #23 `human_page_load` 异常分类处理 ✅
+- [x] #24 `_blogger_index` 重复 user_id 警告 ✅
+- [x] #25 `_get_int`/`_get_bool` 错误上下文 ✅
+
+> **赵铁城回复 — 2026-06-08 17:50**
+>
+> ## Round 5 修复汇总
+>
+> 全部 3 项已修完。测试 21/21 passed ✅  |  提交 `aac90f0`
+>
+> ### #23 🟡 human_page_load 异常分类
+> ✅ **已修改** — `except TimeoutError:` 走 `domcontentloaded` fallback；`except Exception:` 加 `logging.getLogger(__name__).warning(exc_info=True)` 后同样 fallback。新增 `import logging`。
+>
+> ### #24 🟢 _blogger_index 重复警告
+> ✅ **已修改** — logger 初始化后构建索引，插入前检查 `uid in self._blogger_index`，命中则 `self.logger.warning(...)` 提示覆盖。
+>
+> ### #25 🟢 _get_int/_get_bool 错误上下文
+> ✅ **已修改** — `_get_int` catch `ValueError` → re-raise 带变量名和原始值；`_get_bool` 增加合法值白名单校验，非法值抛明确错误。
 
 > **陈明远注 — 2026-06-08 17:38**：Round 5 为深度扫描。3 项全部为边际改进，均不影响功能性。项目代码质量已经很高，本轮修完后可进入架构级别的长期讨论（如 aiosqlite 迁移计划、MediaCrawler upstream patch 推进等）。
