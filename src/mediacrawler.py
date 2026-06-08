@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
-MEDIACRAWLER_PATH = Path("/Users/yiqizijiu/.openclaw/tools/MediaCrawler")
+MEDIACRAWLER_PATH = Path(
+    os.getenv("MEDIACRAWLER_PATH") or Path.home() / ".openclaw" / "tools" / "MediaCrawler"
+).expanduser()
 
 
 def ensure_mediacrawler_path() -> None:

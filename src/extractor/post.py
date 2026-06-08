@@ -10,7 +10,7 @@ ensure_mediacrawler_path()
 
 try:
     from tools.crawler_util import normalize_interaction_count
-except Exception:
+except ImportError:
     def normalize_interaction_count(count_str: str) -> dict[str, int | str]:
         raw = str(count_str).strip() if count_str else ""
         try:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from src.extractor.blogger import BloggerExtractor
@@ -13,7 +13,7 @@ from src.miner.browser import CDPBrowserManager
 from src.miner.human_sim import HumanSimulator
 from src.miner.login import ensure_login
 from src.storage.database import Database
-from src.storage.models import CrawlLog
+from src.storage.models import CrawlLog, utc_now_iso
 
 ensure_mediacrawler_path()
 
@@ -21,6 +21,9 @@ import config as mediacrawler_config
 from media_platform.xhs.client import XiaoHongShuClient
 from media_platform.xhs.help import parse_creator_info_from_url
 from tools import utils as mediacrawler_utils
+
+RATE_LIMIT_ERROR_MARKERS = ("429", "rate limit", "too many requests", "\u9891\u7e41")
+XHS_USER_ID_CHARS = set("0123456789abcdefABCDEF")
 
 
 @dataclass(slots=True)
@@ -30,6 +33,13 @@ class CrawlResult:
     posts_new: int = 0
     status: str = "success"
     error_message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CreatorTarget:
+    user_id: str
+    xsec_token: str = ""
+    xsec_source: str = ""
 
 
 class BloggerCrawler:
@@ -48,7 +58,7 @@ class BloggerCrawler:
         self.cookie_urls = [self.index_url]
 
     async def crawl_blogger(self, blogger_config: dict[str, Any]) -> CrawlResult:
-        started_at = _now_iso()
+        started_at = utc_now_iso()
         user_id = self._resolve_user_id(blogger_config)
         posts_found = 0
         posts_new = 0
@@ -91,7 +101,7 @@ class BloggerCrawler:
                 CrawlLog(
                     blogger_user_id=user_id,
                     started_at=started_at,
-                    finished_at=_now_iso(),
+                    finished_at=utc_now_iso(),
                     posts_found=posts_found,
                     posts_new=posts_new,
                     status=status,
@@ -110,9 +120,7 @@ class BloggerCrawler:
     async def _get_blogger_info(self, blogger_config: dict[str, Any]) -> dict[str, Any]:
         if self.xhs_client is None:
             raise RuntimeError("XHS client is not initialized")
-        creator = parse_creator_info_from_url(
-            str(blogger_config.get("homepage_url") or blogger_config.get("user_id"))
-        )
+        creator = self._parse_creator(blogger_config)
         return await self._with_retries(
             self.xhs_client.get_creator_info,
             user_id=creator.user_id,
@@ -124,9 +132,7 @@ class BloggerCrawler:
         if self.xhs_client is None:
             raise RuntimeError("XHS client is not initialized")
 
-        creator = parse_creator_info_from_url(
-            str(blogger_config.get("homepage_url") or blogger_config.get("user_id"))
-        )
+        creator = self._parse_creator(blogger_config)
         max_count = int(
             (blogger_config.get("notes") or {}).get(
                 "max_count",
@@ -245,7 +251,14 @@ class BloggerCrawler:
                 last_error = exc
                 if attempt == retries:
                     break
-                await asyncio.sleep(min(2 * attempt, self.config.CRAWLER_MAX_SLEEP_SEC))
+                if _is_rate_limit_error(exc):
+                    sleep_time = min(
+                        2**attempt + random.uniform(0, 1),
+                        self.config.CRAWLER_MAX_SLEEP_SEC,
+                    )
+                else:
+                    sleep_time = min(2 * attempt, self.config.CRAWLER_MAX_SLEEP_SEC)
+                await asyncio.sleep(sleep_time)
         if last_error is not None:
             raise last_error
         return None
@@ -271,11 +284,33 @@ class BloggerCrawler:
         mediacrawler_config.HEADLESS = bool(self.config.HEADLESS)
         mediacrawler_config.ENABLE_GET_COMMENTS = False
 
+    def _parse_creator(self, blogger_config: dict[str, Any]) -> CreatorTarget:
+        homepage_url = str(blogger_config.get("homepage_url") or "").strip()
+        if homepage_url:
+            creator = parse_creator_info_from_url(homepage_url)
+            return CreatorTarget(
+                user_id=creator.user_id,
+                xsec_token=creator.xsec_token,
+                xsec_source=creator.xsec_source,
+            )
+
+        user_id = str(blogger_config.get("user_id") or "").strip()
+        if _is_xhs_user_id(user_id):
+            return CreatorTarget(user_id=user_id)
+
+        raise ValueError(
+            "Blogger config must include a non-empty homepage_url or a "
+            "24-character hexadecimal user_id"
+        )
+
     def _resolve_user_id(self, blogger_config: dict[str, Any]) -> str:
-        if blogger_config.get("homepage_url"):
-            return parse_creator_info_from_url(str(blogger_config["homepage_url"])).user_id
-        return str(blogger_config.get("user_id") or "")
+        return self._parse_creator(blogger_config).user_id
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+def _is_xhs_user_id(value: str) -> bool:
+    return len(value) == 24 and all(char in XHS_USER_ID_CHARS for char in value)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return any(marker in message for marker in RATE_LIMIT_ERROR_MARKERS)
