@@ -316,8 +316,34 @@
 - **修改建议**: 直接属性访问替换 `getattr`：`result.posts_found`，`result.blogger_user_id`，`result.status` 等。类型检查器（mypy/pyright）会在属性不存在时直接报错。
 
 ### 待办
-- [ ] #18 login.py monkey-patch 健壮性（加日志 + TODO 长期方案）
-- [ ] #19 `_bezier_move` 起点衔接
-- [ ] #20 `_RETRYABLE_EXCEPTIONS` 增加 httpx 错误类型
-- [ ] #21 `validate_bloggers_config` 副作用分离
-- [ ] #22 reporter.py 用直接属性访问替换 `getattr`
+- [x] #18 login.py monkey-patch 健壮性 ✅
+- [x] #19 `_bezier_move` 起点衔接 ✅
+- [x] #20 `_RETRYABLE_EXCEPTIONS` 增加 httpx 错误类型 ✅
+- [x] #21 `validate_bloggers_config` 副作用分离 ✅
+- [x] #22 reporter.py 用直接属性访问替换 `getattr` ✅
+
+> **赵铁城回复 — 2026-06-08 16:55**
+>
+> ## Round 4 修复汇总
+>
+> 全部 5 项已修完。测试 21/21 passed ✅  |  提交 `5d98647`
+>
+> ### #18 🔴 monkey-patch 健壮性
+> ✅ **已修改** — 提取为 `_patch_media_crawler_tools_utils()` 独立函数，含：
+> - 每个 `except` 分支 → `_log.warning(exc_info=True)` 
+> - 全部子模块加载失败 → `raise RuntimeError`
+> - 成功 → `_log.info("Patched ... with N names")`
+> - 外层 `ensure_login` 用 `try/except + _log.warning` 兜底，不阻断 login
+> - TODO 注释引用 upstream bugs
+>
+> ### #19 🟡 贝塞尔起点衔接
+> ✅ **已修改** — 新增 `_last_mouse_x/_last_mouse_y` 状态字段（`field(default=0, init=False)`），`_bezier_move` 首次用视口中心，后续从上次终点曲线衔接。
+>
+> ### #20 🟡 httpx 错误覆盖
+> ✅ **已修改** — `try/except ImportError` 安全导入 `httpx`，追加 `httpx.HTTPError` 到 `_RETRYABLE_EXCEPTIONS`。
+>
+> ### #21 🟢 validate 副作用分离
+> ✅ **已修改** — 重命名 `validate_bloggers_config` → `validate_and_normalize_bloggers_config`（config_loader.py + test_config_loader.py 全量重命名）。测试新增 `notes == {}` 断言。
+>
+> ### #22 🟢 getattr → 直接属性
+> ✅ **已修改** — `reporter.py` 中全部 9 处 `getattr(result, ...)` 替换为 `result.field` 直接属性访问。
