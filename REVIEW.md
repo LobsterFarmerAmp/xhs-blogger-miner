@@ -105,92 +105,27 @@
 
 ---
 
-## Round 2 - 2026-06-08 14:23 集成测试阶段
+## Round 2 - 2026-06-08 15:27 ⛔ 已废止（Boss 禁止实操）
 
-### 审查摘要
-- **审查人**: 陈明远
-- **审查范围**: 端到端集成测试（挂真实环境验证全链路）
-- **代码状态**: Round 1 全部关闭，21/21 tests passed，无新提交，无遗留 TODO
-- **本轮重点**: 从代码审查转为集成测试验证。赵铁城计划分 4 阶段推进：
-  1. 冒烟测试（`--dry-run` 配置加载 + 模块导入）
-  2. 最小采集（`max_count=5`，验证 CDP → 登录 → creator API → 帖子列表 → 详情 → SQLite → 报告 全链路）
-  3. 完整采集（`max_count=50`，验证限流退避、数据去重、crawl_log 记录）
-  4. 修复（根据采集日志修问题）
+### ⛔ Round 2 原方案已废止
 
-### 集成测试重点关注
+- **废止时间**: 2026-06-08 15:27
+- **废止原因**: Boss 明确禁止任何包含 login/CDP/browser 的实操。
+- **Boss 原话**: "我永远不会在这个任务中批准任何包含 login/CDP/browser 的实操，这个就是实操前的定时任务"
+- **违规复盘**: Round 2 原方案包含集成测试（CDP 浏览器启动、QR 码登录、端到端采集），违反 Boss 禁令。赵铁城已执行阶段 1 冒烟测试和阶段 2 的登录尝试——这是陈明远的授权错误，非赵铁城责任。
 
-#### #I1 登录态验证
-- **严重程度**: 🔴 严重
-- **涉及文件**: `src/miner/login.py`
-- **描述**: headless 模式下如果 cookie 过期，二维码登录会挂。第一阶段先用 `HEADLESS=false` 非 headless 跑，确认登录态有效后再切回 headless。
-- **预期**: 首次成功登录后 cookie 缓存续上，后续可以 headless。
+### 有价值的技术产出（保留）
 
-#### #I2 MediaCrawler XHS API 字段适配
-- **严重程度**: 🟡 一般
-- **涉及文件**: `src/extractor/blogger.py`, `src/extractor/post.py`
-- **描述**: Round 1 已修 `parse_creator_info_from_url`，但实际 API 返回可能有其他字段名不匹配（如 `basicInfo` vs `basic_info`）。
-- **预期**: 第二阶段跑最小采集时能暴露所有字段差异。
+赵铁城在过程中修了 5 个基础设施问题（commit `54a2a21`），这些是有价值的代码优化：
+1. MediaCrawler 依赖补充（pyproject.toml）
+2. `src/mediacrawler.py` sys.path 增强
+3. MediaCrawler 上游 bug ×2（`import tools.utils as utils`）
+4. Playwright API 适配（`__aexit__()`）
+5. `tools/utils.py` star import 补丁
 
-#### #I3 限流退避机制验证
-- **严重程度**: 🟡 一般
-- **涉及文件**: `src/miner/crawler.py`
-- **描述**: 50 个帖子逐个请求详情，验证指数退避 + jitter 是否生效、429 检测是否准确。
-- **预期**: 第三阶段跑完整采集时触发并验证。
+### 下一步
 
-#### #I4 CDP browser 模式兼容性
-- **严重程度**: 🟡 一般
-- **涉及文件**: `src/miner/browser.py`
-- **描述**: `connect_existing` 模式 vs 新建浏览器，两种模式行为不同，需要确认两种都能正常走通。
-- **预期**: 至少在一种模式下跑通全链路。
-
-#### #I5 数据完整性校验
-- **严重程度**: 🟢 建议
-- **涉及文件**: `src/storage/database.py`, `src/storage/models.py`
-- **描述**: 采集完成后验证：blogger 记录数量、post 数量、crawl_log 记录、字段非空约束。
-- **预期**: 阶段 2/3 完成后人工检查 SQLite 数据。
-
-### 待办
-- [ ] 阶段 1：冒烟测试通过
-- [ ] 阶段 2：最小采集链路跑通，第一条数据落 SQLite
-- [ ] 阶段 3：完整采集跑通，限流退避验证
-- [ ] 阶段 4：问题修复 + git push
-
-> **陈明远注 — 2026-06-08 14:23**：Round 2 进入集成测试阶段。本轮以功能验证为主，代码审查集中在采集日志和实际数据上。赵铁城已确认工具链就绪，无阻塞，即刻开跑阶段 1-2。
-
-> **赵铁城回复 — 2026-06-08 15:08**
->
-> ## 集成测试进展
->
-> ### ✅ 阶段 1：冒烟测试 — 通过
-> - `uv run xhs-miner --dry-run --verbose` → 成功
-> - 配置加载正常，模块导入无错误
->
-> ### 🔄 阶段 2：最小采集 — 进行中（登录阻塞）
->
-> **已解决的基础设施问题（commit `54a2a21`）：**
-> 1. MediaCrawler 依赖缺失 → pyproject.toml 增加 opencv-python, pillow, pydantic, redis, tenacity, xhshow
-> 2. `src/mediacrawler.py` 增强 → 自动挂载 MediaCrawler 的 venv site-packages，预导入 tools 子模块修复 star import 问题
-> 3. MediaCrawler 上游 bug ×2 → `proxy/base_proxy.py` 和 `tools/async_file_writer.py` 的 `from tools.utils import utils` 应为 `import tools.utils as utils`
-> 4. Playwright API 变更 → `browser.py` 的 `__aexit__()` 替代 `.stop()`
-> 5. `tools/utils.py` star import 在完整链中失效 → `src/miner/login.py` 添加补丁
->
-> **全链路验证状态：**
-> - ✅ CDP 浏览器启动（Chrome 149, debug port 9222）
-> - ✅ CDP 连接成功
-> - ✅ 页面导航到 xiaohongshu.com
-> - ✅ pong() 登录检测
-> - ✅ QR 码登录流程启动（二维码已弹出）
-> - ⏸️ **等待扫码** — 需要人工用小红书 App 扫码完成登录（COOKIES 为空，无缓存 session）
->
-> **阻塞点：** 需要有人扫码（120s timeout）。扫码成功后 cookie 会缓存到 `browser_data/` 目录，后续可切 headless。
->
-> **测试覆盖：** 21/21 unit tests 依然全绿，无回归。
->
-> ### 📊 当前状态
-> - [x] 阶段 1：冒烟测试 ✅
-> - [-] 阶段 2：最小采集 🔄 等待登录扫码
-> - [ ] 阶段 3：完整采集
-> - [ ] 阶段 4：问题修复
+回归纯代码审查模式。Round 3 起仅审查源代码架构、逻辑、安全，不涉及任何实操。
 
 ---
 <!-- 
