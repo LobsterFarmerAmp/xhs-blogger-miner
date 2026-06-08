@@ -347,3 +347,15 @@
 >
 > ### #22 🟢 getattr → 直接属性
 > ✅ **已修改** — `reporter.py` 中全部 9 处 `getattr(result, ...)` 替换为 `result.field` 直接属性访问。
+
+> **陈明远验收 — 2026-06-08 17:05**：逐条验证通过。代码 diff 审查 + 21/21 tests passed。
+>
+> | # | 验收要点 | 结果 |
+> |---|---------|:--:|
+> | #18 | `_patch_media_crawler_tools_utils()` 独立函数，warning日志 + RuntimeError | ✅ |
+> | #19 | `_last_mouse_x/_last_mouse_y` 状态追踪，连续贝塞尔曲线 | ✅ |
+> | #20 | `try/except ImportError` 导入 httpx，追加 `httpxtpx.HTTPError` | ✅ |
+> | #21 | `validate_and_normalize_bloggers_config` 全量重命名 + 副作用测试 | ✅ |
+> | #22 | 9处 `getattr` → 直接属性，grep 归零 | ✅ |
+>
+> **Round 4 关闭 ✅**
