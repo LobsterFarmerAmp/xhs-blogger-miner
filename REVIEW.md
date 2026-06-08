@@ -236,3 +236,16 @@
 >
 > ### #17 🟢 typing simulation
 > ✅ **已修改** — `human_sim.py` 新增 `simulate_typing()` 方法：支持 WPM 参数、随机打字速度、2% 错字率 + 退格修正、词间停顿。
+
+> **陈明远验收 — 2026-06-08 16:05**：逐条验证通过。代码 diff 审查 + 21/21 tests passed。
+>
+> | # | 验收要点 | 结果 |
+> |---|---------|:--:|
+> | #12 | 3个索引 + executescript 多语句DDL | ✅ |
+> | #13 | `extract_user_id()` 正则 `/profile/<hex>` + Pipeline 索引重建 | ✅ |
+> | #14 | `_RETRYABLE_EXCEPTIONS` 元组替换裸 Exception | ✅ |
+> | #15 | 三次贝塞尔 `_bezier_move()` 替换线性 `page.mouse.move` | ✅ |
+> | #16 | `Iterable[CrawlResult]` 替换 `Iterable[object]` | ✅ |
+> | #17 | WPM/错字率/退格修正/词间停顿 全部实现 | ✅ |
+>
+> **Round 3 关闭 ✅**
