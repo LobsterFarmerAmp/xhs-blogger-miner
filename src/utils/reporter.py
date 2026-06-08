@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -86,3 +88,62 @@ class Reporter:
             lines.extend(f"- {error}" for error in errors)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path
+
+    def export_csv(
+        self,
+        results: list[CrawlResult],
+        output_path: Path | None = None,
+    ) -> Path:
+        if output_path is None:
+            report_dir = self.output_dir / "exports"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            output_path = report_dir / f"xhs_miner_export_{timestamp}.csv"
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with output_path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.writer(file)
+            writer.writerow(["博主ID", "发现帖子", "新增帖子", "状态", "错误信息"])
+            for result in results:
+                writer.writerow(
+                    [
+                        result.blogger_user_id,
+                        result.posts_found,
+                        result.posts_new,
+                        result.status,
+                        result.error_message,
+                    ]
+                )
+        self.logger.info("CSV export written to %s", output_path)
+        return output_path
+
+    def export_json(
+        self,
+        results: list[CrawlResult],
+        output_path: Path | None = None,
+    ) -> Path:
+        if output_path is None:
+            report_dir = self.output_dir / "exports"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            output_path = report_dir / f"xhs_miner_export_{timestamp}.json"
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = [
+            {
+                "blogger_user_id": result.blogger_user_id,
+                "posts_found": result.posts_found,
+                "posts_new": result.posts_new,
+                "status": result.status,
+                "error_message": result.error_message,
+            }
+            for result in results
+        ]
+        output_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        self.logger.info("JSON export written to %s", output_path)
+        return output_path

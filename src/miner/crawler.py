@@ -10,9 +10,10 @@ from src.extractor.blogger import BloggerExtractor
 from src.extractor.post import PostExtractor
 from src.mediacrawler import ensure_mediacrawler_path
 from src.miner.human_sim import HumanSimulator
-from src.utils.crawler_helpers import is_rate_limit_error, is_xhs_user_id
 from src.storage.database import Database
 from src.storage.models import CrawlLog, utc_now_iso
+from src.utils.crawler_helpers import is_xhs_user_id
+from src.utils.error_codes import XHSErrorCode, classify_error, is_retryable
 
 ensure_mediacrawler_path()
 
@@ -66,15 +67,39 @@ class BloggerCrawler:
         self.index_url = "https://www.xiaohongshu.com"
         self.cookie_urls = [self.index_url]
 
-    async def crawl_blogger(self, blogger_config: dict[str, Any]) -> CrawlResult:
+    async def crawl_blogger(
+        self,
+        blogger_config: dict[str, Any],
+        resume: bool = False,
+    ) -> CrawlResult:
         started_at = utc_now_iso()
         user_id = self._resolve_user_id(blogger_config)
+        collected_note_ids: set[str] = set()
         posts_found = 0
         posts_new = 0
         status = "success"
         error_message = ""
 
         try:
+            if resume:
+                last_crawl_log = self.db.get_last_crawl_log(user_id)
+                collected_note_ids = self.db.get_collected_note_ids(user_id)
+                if collected_note_ids:
+                    if last_crawl_log:
+                        self.logger.info(
+                            "Resuming from crawl log %s: %d posts already "
+                            "collected for blogger %s, skipping",
+                            last_crawl_log.get("id"),
+                            len(collected_note_ids),
+                            user_id,
+                        )
+                    else:
+                        self.logger.info(
+                            "Resuming: %d posts already collected for blogger "
+                            "%s, skipping",
+                            len(collected_note_ids),
+                            user_id,
+                        )
             await self._ensure_client()
             creator_info = await self._get_blogger_info(blogger_config)
             blogger = self.blogger_extractor.extract_blogger_data(
@@ -85,8 +110,13 @@ class BloggerCrawler:
             )
             self.db.upsert_blogger(blogger)
 
-            post_cards = await self._get_blogger_posts(blogger_config)
+            post_cards = await self._get_blogger_posts(
+                blogger_config,
+                collected_note_ids=collected_note_ids,
+            )
             posts_found = len(post_cards)
+            if resume:
+                posts_found += len(collected_note_ids)
             for post_card in post_cards:
                 detail = await self._get_post_detail(
                     str(post_card.get("note_id") or post_card.get("id") or ""),
@@ -135,7 +165,11 @@ class BloggerCrawler:
             xsec_source=creator.xsec_source,
         )
 
-    async def _get_blogger_posts(self, blogger_config: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _get_blogger_posts(
+        self,
+        blogger_config: dict[str, Any],
+        collected_note_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         creator = self._parse_creator(blogger_config)
         max_count = int(
             (blogger_config.get("notes") or {}).get(
@@ -143,23 +177,34 @@ class BloggerCrawler:
                 self.config.CRAWLER_MAX_POSTS_PER_BLOGGER,
             )
         )
+        collected_note_ids = collected_note_ids or set()
         notes: list[dict[str, Any]] = []
+        posts_seen = 0
         cursor = ""
         has_more = True
 
-        while has_more and len(notes) < max_count:
+        while has_more and posts_seen < max_count:
+            page_size = min(30, max_count - posts_seen)
             response = await self._with_retries(
                 self.xhs_client.get_notes_by_creator,
                 creator=creator.user_id,
                 cursor=cursor,
-                page_size=min(30, max_count - len(notes)),
+                page_size=page_size,
                 xsec_token=creator.xsec_token,
                 xsec_source=creator.xsec_source or "pc_feed",
             )
             if not response:
                 break
             batch = response.get("notes") or []
-            notes.extend(batch[: max_count - len(notes)])
+            batch = batch[: max_count - posts_seen]
+            posts_seen += len(batch)
+            new_batch = [
+                note
+                for note in batch
+                if str(note.get("note_id") or note.get("id") or "")
+                not in collected_note_ids
+            ]
+            notes.extend(new_batch)
             has_more = bool(response.get("has_more"))
             cursor = str(response.get("cursor") or "")
             if has_more:
@@ -258,15 +303,27 @@ class BloggerCrawler:
                 raise
             except _RETRYABLE_EXCEPTIONS as exc:
                 last_error = exc
+                error_code = classify_error(exc)
+                if error_code is not None and not is_retryable(error_code):
+                    self.logger.warning(
+                        "Non-retryable error code %s, not retrying",
+                        error_code.name,
+                    )
+                    raise
                 if attempt == retries:
                     break
-                if is_rate_limit_error(exc):
+                if error_code is None:
+                    sleep_time = min(2 * attempt, self.config.CRAWLER_MAX_SLEEP_SEC)
+                elif error_code in (XHSErrorCode.CAPTCHA, XHSErrorCode.IP_BLOCKED):
+                    sleep_time = min(
+                        4**attempt + random.uniform(1, 5),
+                        self.config.CRAWLER_MAX_SLEEP_SEC,
+                    )
+                elif is_retryable(error_code):
                     sleep_time = min(
                         2**attempt + random.uniform(0, 1),
                         self.config.CRAWLER_MAX_SLEEP_SEC,
                     )
-                else:
-                    sleep_time = min(2 * attempt, self.config.CRAWLER_MAX_SLEEP_SEC)
                 await asyncio.sleep(sleep_time)
         if last_error is not None:
             raise last_error
@@ -314,4 +371,3 @@ class BloggerCrawler:
 
     def _resolve_user_id(self, blogger_config: dict[str, Any]) -> str:
         return self._parse_creator(blogger_config).user_id
-

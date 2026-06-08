@@ -13,6 +13,13 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--blogger", help="Crawl a specific blogger user_id")
     parser.add_argument("--config", help="Path to bloggers YAML config")
     parser.add_argument("--dry-run", action="store_true", help="Validate config without crawling")
+    parser.add_argument("--resume", action="store_true", help="Skip previously collected posts")
+    parser.add_argument(
+        "--format",
+        choices=["markdown", "csv", "json", "all"],
+        default="markdown",
+        help="Output report format (default: markdown)",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     parser.add_argument(
         "--headless",
@@ -47,9 +54,9 @@ async def run(args: argparse.Namespace) -> None:
     if args.dry_run:
         await pipeline.run_dry_run()
     elif args.blogger:
-        await pipeline.run_one(args.blogger)
+        await pipeline.run_one(args.blogger, resume=args.resume, format=args.format)
     else:
-        await pipeline.run_all()
+        await pipeline.run_all(resume=args.resume, format=args.format)
 
 
 def main() -> None:

@@ -37,18 +37,27 @@ class Pipeline:
         self.crawler = BloggerCrawler(config, self.db, self.human_sim)
         self.reporter = Reporter(config.SAVE_DATA_PATH, self.logger)
 
-    async def run_all(self) -> ReportSummary:
+    async def run_all(self, resume: bool = False, format: str = "markdown") -> ReportSummary:
         self.db.initialize()
         started = time.monotonic()
         results: list[CrawlResult] = []
         try:
             for blogger_config in self.bloggers_config["bloggers"]:
-                results.append(await self.crawler.crawl_blogger(blogger_config))
+                results.append(
+                    await self.crawler.crawl_blogger(blogger_config, resume=resume)
+                )
         finally:
             await self.crawler.close()
-        return self.reporter.generate(results, time.monotonic() - started)
+        summary = self.reporter.generate(results, time.monotonic() - started)
+        self._export_results(results, format)
+        return summary
 
-    async def run_one(self, user_id: str) -> ReportSummary:
+    async def run_one(
+        self,
+        user_id: str,
+        resume: bool = False,
+        format: str = "markdown",
+    ) -> ReportSummary:
         self.db.initialize()
         started = time.monotonic()
         target = self._blogger_index.get(str(user_id))
@@ -56,10 +65,12 @@ class Pipeline:
             raise ValueError(f"Blogger not found in config: {user_id}")
 
         try:
-            results = [await self.crawler.crawl_blogger(target)]
+            results = [await self.crawler.crawl_blogger(target, resume=resume)]
         finally:
             await self.crawler.close()
-        return self.reporter.generate(results, time.monotonic() - started)
+        summary = self.reporter.generate(results, time.monotonic() - started)
+        self._export_results(results, format)
+        return summary
 
     async def run_dry_run(self) -> ReportSummary:
         self.db.initialize()
@@ -73,3 +84,9 @@ class Pipeline:
         ]
         await asyncio.sleep(0)
         return self.reporter.generate(results, time.monotonic() - started)
+
+    def _export_results(self, results: list[CrawlResult], format: str) -> None:
+        if format in ("csv", "all"):
+            self.reporter.export_csv(results)
+        if format in ("json", "all"):
+            self.reporter.export_json(results)

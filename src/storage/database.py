@@ -119,6 +119,25 @@ class Database:
                 result.append(d)
             return result
 
+    def get_last_crawl_log(self, blogger_user_id: str) -> dict[str, Any] | None:
+        """Return the most recent crawl_log for a blogger, or None."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM crawl_logs WHERE blogger_user_id = ? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (blogger_user_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_collected_note_ids(self, blogger_user_id: str) -> set[str]:
+        """Return note_ids already stored for a blogger."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT note_id FROM posts WHERE blogger_user_id = ?",
+                (blogger_user_id,),
+            ).fetchall()
+            return {str(row["note_id"]) for row in rows}
+
     def close(self) -> None:
         if self._memory_connection is not None:
             self._memory_connection.close()
