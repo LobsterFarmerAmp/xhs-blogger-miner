@@ -135,3 +135,80 @@
   - 赵铁城回复写在引用块（>）内，标注时间和状态
   - 状态标记：✅ 已修改 / 🔄 进行中 / ❓ 有争议 / ⏸️ 暂缓
 -->
+
+---
+
+## Round 3 - 2026-06-08 15:30 纯代码优化
+
+### 审查摘要
+- **审查人**: 陈明远
+- **审查范围**: 全项目代码质量、架构、性能、安全
+- **代码状态**: 21/21 tests passed，Round 1 全部关闭，Round 2 已废止
+- **本轮原则**: 纯代码层面优化，不涉及任何 CDP/浏览器/登录/网络实操
+
+### 修改意见
+
+#### #12 缺少 `posts.blogger_user_id` 索引
+- **严重程度**: 🔴 严重
+- **涉及文件**: `src/storage/database.py`, `src/storage/models.py`
+- **问题描述**: `get_posts_for_blogger()` 按 `blogger_user_id` 查询，且 `ORDER BY publish_time DESC`，但该列只有 FOREIGN KEY 约束，没有显式索引。数据量上去后每次查询都是全表扫描。
+- **修改建议**: 在 `TABLE_DDL` 中增加：
+  ```sql
+  CREATE INDEX IF NOT EXISTS idx_posts_blogger_user_id
+  ON posts(blogger_user_id);
+  CREATE INDEX IF NOT EXISTS idx_posts_publish_time
+  ON posts(blogger_user_id, publish_time DESC);
+  ```
+  同时考虑给 `crawl_logs.blogger_user_id` 加索引。
+
+#### #13 `_blogger_index` 不支持仅设 `homepage_url` 的博主
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/pipeline.py:26-29`
+- **问题描述**: `Pipeline.__init__` 构建 `_blogger_index` 时用 `user_id` 做 key，但 `run_one(user_id)` 查的是这个 dict。如果 `bloggers.yaml` 中某博主只配了 `homepage_url` 没配 `user_id`，`run_one()` 永远找不到他，即使 `crawler._parse_creator()` 已经支持从 homepage_url 提取 user_id。
+- **修改建议**: `_blogger_index` 的 key 生成逻辑复用 `crawler._parse_creator()` 或 `_resolve_user_id()`，提取 user_id 后再建索引。或者把 `_parse_creator` 提为独立工具函数，Pipeline 和 Crawler 共用。
+
+#### #14 `_with_retries` 中的裸 `except Exception` 仍然存在
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/miner/crawler.py:241-258`
+- **问题描述**: Round 1 已修了 `except ImportError` 等具体类型，但 `_with_retries` 中第 247 行仍然是 `except Exception as exc`。虽然在 244 行 reraise 了 `TypeError, ValueError, AttributeError`，但仍然会吞掉 `asyncio.CancelledError`、`SystemExit`、`KeyboardInterrupt` 等不该吞的异常。
+- **修改建议**: 将 `except Exception` 改为捕获具体网络/I/O 异常集合：
+  ```python
+  RETRYABLE_EXCEPTIONS = (
+      asyncio.TimeoutError,
+      ConnectionError,
+      OSError,
+  )
+  ```
+  然后 `except RETRYABLE_EXCEPTIONS as exc:`。
+
+#### #15 HumanSimulator 鼠标轨迹为直线
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/miner/human_sim.py:37-45`
+- **问题描述**: `move_mouse_randomly()` 调用 `page.mouse.move(x, y, steps=steps)`，Playwright 默认在两点间做线性插值。真实人手移动鼠标是曲线（贝塞尔曲线或加速-减速模式），直线轨迹容易被反爬检测。
+- **修改建议**: 实现 `_bezier_curve()` 辅助函数，将直线路径替换为 3-4 个控制点的贝塞尔曲线。也可以用分段移动+随机抖动来模拟：
+  ```python
+  async def _human_bezier_move(self, page, target_x, target_y):
+      # 生成贝塞尔控制点，分多段 page.mouse.move
+  ```
+
+#### #16 Reporter 类型标注使用 `list[object]` 丢失类型安全
+- **严重程度**: 🟢 建议
+- **涉及文件**: `src/utils/reporter.py:33,57`
+- **问题描述**: `generate()` 参数类型是 `Iterable[object]`，内部大量使用 `getattr(result, 'posts_found', 0)`，说明实际期望的是 `CrawlResult` 类型。用 `object` 丢失了类型检查。
+- **修改建议**: 导入 `CrawlResult`，改为 `Iterable[CrawlResult]`。`_write_markdown` 同理。
+
+#### #17 缺少 typing simulation（未来需要）
+- **严重程度**: 🟢 建议
+- **涉及文件**: `src/miner/human_sim.py`
+- **问题描述**: 目前 HumanSimulator 无键盘输入模拟。后续如果需要搜索博主、输入关键词等，就会用到。提前预留不影响当前功能，但省得以后重构。
+- **修改建议**: 增加 `simulate_typing(page, text, wpm=60)` 方法，支持随机打字速度（含停顿、退格修正等人类特征）。
+
+### 待办
+- [ ] #12 加数据库索引
+- [ ] #13 修复 `_blogger_index` 对 homepage_url 的支持
+- [ ] #14 收窄 `_with_retries` 异常捕获范围
+- [ ] #15 贝塞尔曲线鼠标轨迹
+- [ ] #16 Reporter 类型标注修正
+- [ ] #17 typing simulation 预留
+
+> **陈明远注 — 2026-06-08 15:30**：Round 3 纯代码优化。6 项全部是代码质量、性能和反爬能力的提升，不涉及任何实操。
