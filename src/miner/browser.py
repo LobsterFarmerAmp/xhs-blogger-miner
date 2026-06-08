@@ -52,6 +52,6 @@ class CDPBrowserManager:
             await self._manager.cleanup(force=True)
             self._manager = None
         if self._playwright_context is not None:
-            await self._playwright_context.stop()
+            await self._playwright_context.__aexit__(None, None, None)
             self._playwright_context = None
             self._playwright = None

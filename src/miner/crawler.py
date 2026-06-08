@@ -16,6 +16,11 @@ from src.storage.models import CrawlLog, utc_now_iso
 
 ensure_mediacrawler_path()
 
+import config as mediacrawler_config
+from media_platform.xhs.client import XiaoHongShuClient
+from media_platform.xhs.help import parse_creator_info_from_url
+from tools.crawler_util import convert_browser_context_cookies
+
 
 @dataclass(slots=True)
 class CrawlResult:
@@ -202,10 +207,7 @@ class BloggerCrawler:
             )
 
     async def _create_xhs_client(self) -> Any:
-        from media_platform.xhs.client import XiaoHongShuClient
-        from tools import utils as mediacrawler_utils
-
-        cookie_str, cookie_dict = await mediacrawler_utils.convert_browser_context_cookies(
+        cookie_str, cookie_dict = await convert_browser_context_cookies(
             self.browser_context,
             urls=self.cookie_urls,
         )
@@ -264,8 +266,6 @@ class BloggerCrawler:
             self.xhs_client = None
 
     def _apply_mediacrawler_config(self) -> None:
-        import config as mediacrawler_config
-
         mediacrawler_config.PLATFORM = "xhs"
         mediacrawler_config.CRAWLER_TYPE = self.config.XHS_CRAWLER_TYPE
         mediacrawler_config.COOKIES = self.config.COOKIES
@@ -283,8 +283,6 @@ class BloggerCrawler:
     def _parse_creator(self, blogger_config: dict[str, Any]) -> CreatorTarget:
         homepage_url = str(blogger_config.get("homepage_url") or "").strip()
         if homepage_url:
-            from media_platform.xhs.help import parse_creator_info_from_url
-
             creator = parse_creator_info_from_url(homepage_url)
             return CreatorTarget(
                 user_id=creator.user_id,

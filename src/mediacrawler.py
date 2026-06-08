@@ -15,6 +15,24 @@ def ensure_mediacrawler_path() -> None:
     if path not in sys.path:
         sys.path.insert(0, path)
 
+    # Include MediaCrawler's own venv site-packages so its dependencies
+    # (aiomysql, matplotlib, motor, etc.) resolve without us duplicating them.
+    mediacrawler_site_packages = str(
+        MEDIACRAWLER_PATH / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    )
+    if mediacrawler_site_packages not in sys.path:
+        sys.path.insert(0, mediacrawler_site_packages)
+
+    # HACK: Pre-import tools submodules so that tools/utils.py's
+    # `from .crawler_util import *` (etc.) resolves correctly when
+    # tools.utils is later imported as part of the MediaCrawler chain.
+    import importlib
+    for _submod in ("tools.crawler_util", "tools.slider_util", "tools.time_util"):
+        try:
+            importlib.import_module(_submod)
+        except Exception:
+            pass
+
     # HACK: Clear cached 'config' modules to avoid namespace collision between
     # MediaCrawler's `config` package and our own `config/` directory. Without
     # this, Python may resolve `import config` to the wrong path. This affects
