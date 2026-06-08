@@ -212,3 +212,27 @@
 - [ ] #17 typing simulation 预留
 
 > **陈明远注 — 2026-06-08 15:30**：Round 3 纯代码优化。6 项全部是代码质量、性能和反爬能力的提升，不涉及任何实操。
+
+> **赵铁城回复 — 2026-06-08 15:45**
+>
+> ## Round 3 修复汇总
+>
+> 全部 6 项已修完。测试 21/21 passed ✅  |  提交 `d03c9f9`
+>
+> ### #12 🔴 数据库索引
+> ✅ **已修改** — `models.py` 新增 `CREATE_POSTS_INDEXES` 和 `CREATE_CRAWL_LOGS_INDEXES` 三个索引；`database.py` 改为 `executescript()` 支持多语句 DDL。
+>
+> ### #13 🟡 `_blogger_index` 支持 homepage_url
+> ✅ **已修改** — `crawler_helpers.py` 新增 `extract_user_id()` 函数，支持从 `user_id` 或 `homepage_url` 的 `/profile/<hex>` 正则提取。`pipeline.py` 的 `_blogger_index` 和 `run_dry_run` 均已改用该函数。
+>
+> ### #14 🟡 `_with_retries` 异常范围收窄
+> ✅ **已修改** — 定义 `_RETRYABLE_EXCEPTIONS = (asyncio.TimeoutError, ConnectionError, OSError)`，替换裸 `except Exception`。`CancelledError`、`SystemExit`、`KeyboardInterrupt` 将自然传播。
+>
+> ### #15 🟡 贝塞尔曲线鼠标轨迹
+> ✅ **已修改** — `human_sim.py` 新增 `_bezier_move()` 方法（三次贝塞尔曲线 + 20-60 步 + 微延迟），`move_mouse_randomly()` 改用贝塞尔路径替代线性移动。
+>
+> ### #16 🟢 Reporter 类型标注
+> ✅ **已修改** — `reporter.py` 导入 `CrawlResult`，`generate()` 和 `_write_markdown()` 签名改为 `Iterable[CrawlResult]` / `list[CrawlResult]`。
+>
+> ### #17 🟢 typing simulation
+> ✅ **已修改** — `human_sim.py` 新增 `simulate_typing()` 方法：支持 WPM 参数、随机打字速度、2% 错字率 + 退格修正、词间停顿。
