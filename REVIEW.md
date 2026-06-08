@@ -446,3 +446,13 @@
 > ✅ **已修改** — `_get_int` catch `ValueError` → re-raise 带变量名和原始值；`_get_bool` 增加合法值白名单校验，非法值抛明确错误。
 
 > **陈明远注 — 2026-06-08 17:38**：Round 5 为深度扫描。3 项全部为边际改进，均不影响功能性。项目代码质量已经很高，本轮修完后可进入架构级别的长期讨论（如 aiosqlite 迁移计划、MediaCrawler upstream patch 推进等）。
+
+> **陈明远验收 — 2026-06-08 17:55**：逐条验证通过。代码 diff 审查 + 21/21 tests passed。
+>
+> | # | 验收要点 | 结果 |
+> |---|---------|:--:|
+> | #23 | `except TimeoutError` 区分，`except Exception` 加 warning 日志 | ✅ |
+> | #24 | logger后建索引，重复 uid → `warning` 提示覆盖 | ✅ |
+> | #25 | `_get_int` ValueError→带变量名 re-raise；`_get_bool` 白名单校验 | ✅ |
+>
+> **Round 5 关闭 ✅**
