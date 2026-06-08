@@ -43,7 +43,7 @@ class Database:
         with self.connection() as conn:
             conn.execute("PRAGMA foreign_keys = ON")
             for ddl in TABLE_DDL:
-                conn.execute(ddl)
+                conn.executescript(ddl)
 
     def upsert_blogger(self, blogger: Blogger | dict[str, Any]) -> None:
         data = _to_record(blogger)

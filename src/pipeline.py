@@ -9,6 +9,7 @@ from src.config_loader import load_bloggers_config
 from src.miner.crawler import BloggerCrawler, CrawlResult
 from src.miner.human_sim import HumanSimulator
 from src.storage.database import Database
+from src.utils.crawler_helpers import extract_user_id
 from src.utils.logger import setup_logger
 from src.utils.reporter import Reporter, ReportSummary
 
@@ -19,7 +20,7 @@ class Pipeline:
         self.bloggers_config = load_bloggers_config(bloggers_config_path)
         self._blogger_index: dict[str, dict[str, Any]] = {}
         for item in self.bloggers_config["bloggers"]:
-            uid = str(item.get("user_id") or "")
+            uid = extract_user_id(item)
             if uid:
                 self._blogger_index[uid] = item
         self.logger = setup_logger(level=config.LOG_LEVEL, data_path=config.SAVE_DATA_PATH)
@@ -60,7 +61,7 @@ class Pipeline:
         started = time.monotonic()
         results = [
             CrawlResult(
-                blogger_user_id=str(item.get("user_id") or item.get("homepage_url") or ""),
+                blogger_user_id=extract_user_id(item) or str(item.get("homepage_url") or ""),
                 status="success",
             )
             for item in self.bloggers_config["bloggers"]

@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Iterable
 
+from src.miner.crawler import CrawlResult
+
 
 @dataclass(slots=True)
 class ReportSummary:
@@ -22,7 +24,7 @@ class Reporter:
         self.output_dir = Path(output_dir)
         self.logger = logger or logging.getLogger("xhs_miner.reporter")
 
-    def generate(self, results: Iterable[object], elapsed_seconds: float) -> ReportSummary:
+    def generate(self, results: Iterable[CrawlResult], elapsed_seconds: float) -> ReportSummary:
         result_list = list(results)
         errors = [
             f"{result.blogger_user_id}: {result.error_message}"
@@ -50,7 +52,7 @@ class Reporter:
 
     def _write_markdown(
         self,
-        results: list[object],
+        results: list[CrawlResult],
         errors: list[str],
         elapsed_seconds: float,
     ) -> Path:

@@ -118,8 +118,22 @@ CREATE TABLE IF NOT EXISTS crawl_logs (
 );
 """
 
+CREATE_POSTS_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_posts_blogger_user_id
+ON posts(blogger_user_id);
+CREATE INDEX IF NOT EXISTS idx_posts_publish_time
+ON posts(blogger_user_id, publish_time DESC);
+"""
+
+CREATE_CRAWL_LOGS_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_crawl_logs_blogger_user_id
+ON crawl_logs(blogger_user_id);
+"""
+
 TABLE_DDL = (
     CREATE_BLOGGERS_TABLE,
     CREATE_POSTS_TABLE,
     CREATE_CRAWL_LOGS_TABLE,
+    CREATE_POSTS_INDEXES,
+    CREATE_CRAWL_LOGS_INDEXES,
 )

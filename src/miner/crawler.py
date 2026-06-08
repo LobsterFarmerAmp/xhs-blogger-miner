@@ -21,6 +21,12 @@ from media_platform.xhs.client import XiaoHongShuClient
 from media_platform.xhs.help import parse_creator_info_from_url
 from tools.crawler_util import convert_browser_context_cookies
 
+_RETRYABLE_EXCEPTIONS = (
+    asyncio.TimeoutError,
+    ConnectionError,
+    OSError,
+)
+
 
 @dataclass(slots=True)
 class CrawlResult:
@@ -243,7 +249,7 @@ class BloggerCrawler:
                 return await func(*args, **kwargs)
             except (TypeError, ValueError, AttributeError):
                 raise
-            except Exception as exc:
+            except _RETRYABLE_EXCEPTIONS as exc:
                 last_error = exc
                 if attempt == retries:
                     break
@@ -301,6 +307,5 @@ class BloggerCrawler:
 
     def _resolve_user_id(self, blogger_config: dict[str, Any]) -> str:
         return self._parse_creator(blogger_config).user_id
-
 
 
