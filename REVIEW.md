@@ -456,3 +456,42 @@
 > | #25 | `_get_int` ValueError→带变量名 re-raise；`_get_bool` 白名单校验 | ✅ |
 >
 > **Round 5 关闭 ✅**
+
+---
+
+## Round 6 - 2026-06-08 18:00 第一档功能开发
+
+### 审查摘要
+- **审查人**: 陈明远
+- **审查范围**: P0 断点续采 + P1 错误码映射 + P2 CSV/JSON 导出
+- **代码状态**: 28/28 tests passed ✅ | +399 −19 lines
+- **总体评价**: 三项功能全部达标，代码质量高。断点续采的 `posts_seen` 计数器设计避免了帖子被删导致死循环的边界问题。错误码分层退避（4^n for CAPTCHA/IP vs 2^n for 普通）合理。CSV utf-8-sig 保证了 Excel 兼容性。
+
+### P0 断点续采
+
+**设计验证**:
+- ✅ `get_last_crawl_log()` + `get_collected_note_ids()` 预加载为 set，O(1) lookup
+- ✅ `posts_seen` 计数器替代 `len(notes)` 控制翻页，避免帖子被删死循环
+- ✅ Resume 时 `posts_found += len(collected_note_ids)` 正确合计
+- ✅ `--resume` CLI flag 接入 pipeline
+
+### P1 错误码映射
+
+**设计验证**:
+- ✅ 5 个枚举值源自 MediaCrawler client.py，源码行号已标注
+- ✅ `classify_error()` 优先 `isinstance`，fallback 字符串匹配
+- ✅ 非可重试（NOTE_NOT_FOUND/ABNORMAL）直接 raise
+- ✅ CAPTCHA/IP_BLOCKED → 4^n + jitter；其他可重试 → 2^n + jitter
+- ✅ 7 个新测试覆盖全部分类逻辑
+
+### P2 CSV/JSON 导出
+
+**设计验证**:
+- ✅ `export_csv()` utf-8-sig → Excel 直接打开无乱码
+- ✅ `export_json()` indent=2, ensure_ascii=False
+- ✅ `--format csv|json|all` CLI 参数
+- ✅ `_export_results()` 调度逻辑清晰
+
+> **陈明远验收 — 2026-06-08 18:05**：P0+P1+P2 全部验证通过。28/28 tests。代码 diff 审查无问题。
+>
+> **Round 6 关闭 ✅ — 第一档功能开发完成**
