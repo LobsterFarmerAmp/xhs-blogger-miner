@@ -359,3 +359,75 @@
 > | #22 | 9处 `getattr` → 直接属性，grep 归零 | ✅ |
 >
 > **Round 4 关闭 ✅**
+
+---
+
+## Round 5 - 2026-06-08 17:38 深度扫描
+
+### 审查摘要
+- **审查人**: 陈明远
+- **审查范围**: 全项目深度扫描（无新提交，主动发现）
+- **代码状态**: 21/21 tests passed ✅，Round 1-4 全部关闭
+- **项目整体评价**: 经过 4 轮 22 项迭代，代码质量已达到较高水准。架构清晰、模块边界合理、反爬模拟到位。本轮发现 3 项边际改进点，均为轻量级修正。
+- **本轮原则**: 纯代码质量审查，不涉及任何实操
+
+### 修改意见
+
+#### #23 `human_page_load` 裸 `except Exception` 吞掉非预期异常
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/miner/human_sim.py:130-132`
+- **问题描述**: `wait_for_load_state("networkidle", timeout=30_000)` 失败后 fallback 到 `domcontentloaded` 是合理的。但裸 `except Exception` 会吞掉非 timeout 类异常（如 `PlaywrightError`、`TargetClosedError`），导致页面加载异常被静默处理，后续操作在无效页面上执行会产生难以排查的错误。
+- **修改建议**: 至少区分 timeout 和其他异常：
+  ```python
+  try:
+      await page.wait_for_load_state("networkidle", timeout=30_000)
+  except TimeoutError:
+      await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+  except Exception:
+      self._log.warning("Unexpected error during page load", exc_info=True)
+      await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+  ```
+  或者至少将 `except Exception` 改为 `except (TimeoutError, Exception)` 并加 `exc_info=True` 日志。
+
+#### #24 `_blogger_index` 重复 user_id 静默覆盖
+- **严重程度**: 🟢 建议
+- **涉及文件**: `src/pipeline.py:26-28`
+- **问题描述**: `Pipeline.__init__` 构建 `_blogger_index` 时，如果两个 blogger 配置解析出相同的 `user_id`（例如一个用 `user_id` 一个用 `homepage_url` 指向同一博主），后者静默覆盖前者。用户不会收到任何提示，可能导致困惑（"我明明配了 5 个博主，怎么只采了 4 个"）。
+- **修改建议**: 在赋值前检查 key 是否已存在，如存在则 `warning` 日志提示：
+  ```python
+  uid = extract_user_id(item)
+  if uid:
+      if uid in self._blogger_index:
+          self.logger.warning(
+              "Duplicate blogger user_id '%s' in config, "
+              "overriding previous entry", uid
+          )
+      self._blogger_index[uid] = item
+  ```
+  注意：这个 log 在 `Pipeline.__init__` 中，需要先初始化 `self.logger`。或者在 logger 初始化后再做索引构建。
+
+#### #25 `_get_int` / `_get_bool` 缺少错误上下文
+- **严重程度**: 🟢 建议
+- **涉及文件**: `config/settings.py:48-57`
+- **问题描述**: `_get_int` 和 `_get_bool` 仅有 `name` 参数但错误信息中未引用。如果 env 变量设错值（如 `CRAWLER_MAX_SLEEP_SEC=abc`），抛出的 `ValueError: invalid literal for int() with base 10: 'abc'` 不包含变量名，需要查 traceback 才能定位。
+- **修改建议**: 在 `_get_int` 中 catch `ValueError` 并 re-raise 带变量名：
+  ```python
+  def _get_int(name: str, default: int) -> int:
+      raw = os.getenv(name)
+      if raw is None or raw == "":
+          return default
+      try:
+          return int(raw)
+      except ValueError:
+          raise ValueError(
+              f"Environment variable {name} must be an integer, got: {raw!r}"
+          ) from None
+  ```
+  `_get_bool` 同理，对非法值给出明确提示。
+
+### 待办
+- [ ] #23 `human_page_load` 异常分类处理
+- [ ] #24 `_blogger_index` 重复 user_id 警告
+- [ ] #25 `_get_int`/`_get_bool` 错误上下文
+
+> **陈明远注 — 2026-06-08 17:38**：Round 5 为深度扫描。3 项全部为边际改进，均不影响功能性。项目代码质量已经很高，本轮修完后可进入架构级别的长期讨论（如 aiosqlite 迁移计划、MediaCrawler upstream patch 推进等）。
