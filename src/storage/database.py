@@ -11,6 +11,10 @@ from src.storage.models import Blogger, CrawlLog, Post, TABLE_DDL
 
 
 class Database:
+    # Concurrency note: This implementation uses per-operation SQLite connections,
+    # which is safe for the current single-blogger serial crawl model. If the
+    # project adopts concurrent blogger collection (asyncio + multiple coroutines),
+    # switch to aiosqlite or a connection-pooled approach to avoid contention.
     def __init__(self, database_path: str | Path = "data/xhs_bloggers.db") -> None:
         self.database_path = str(database_path)
         self._memory_connection: sqlite3.Connection | None = None
@@ -102,7 +106,18 @@ class Database:
                 "SELECT * FROM posts WHERE blogger_user_id = ? ORDER BY publish_time DESC",
                 (blogger_user_id,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            result = []
+            for row in rows:
+                d = dict(row)
+                for field in ("image_urls", "tag_list"):
+                    raw = d.get(field)
+                    if isinstance(raw, str):
+                        try:
+                            d[field] = json.loads(raw)
+                        except json.JSONDecodeError:
+                            d[field] = []
+                result.append(d)
+            return result
 
     def close(self) -> None:
         if self._memory_connection is not None:

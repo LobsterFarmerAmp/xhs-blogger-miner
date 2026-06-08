@@ -17,6 +17,11 @@ class Pipeline:
     def __init__(self, config: Any, bloggers_config_path: str | Path | None = None) -> None:
         self.config = config
         self.bloggers_config = load_bloggers_config(bloggers_config_path)
+        self._blogger_index: dict[str, dict[str, Any]] = {}
+        for item in self.bloggers_config["bloggers"]:
+            uid = str(item.get("user_id") or "")
+            if uid:
+                self._blogger_index[uid] = item
         self.logger = setup_logger(level=config.LOG_LEVEL, data_path=config.SAVE_DATA_PATH)
         self.db = Database(config.DATABASE_PATH)
         self.human_sim = HumanSimulator(
@@ -40,11 +45,7 @@ class Pipeline:
     async def run_one(self, user_id: str) -> ReportSummary:
         self.db.initialize()
         started = time.monotonic()
-        target = None
-        for blogger_config in self.bloggers_config["bloggers"]:
-            if str(blogger_config.get("user_id")) == str(user_id):
-                target = blogger_config
-                break
+        target = self._blogger_index.get(str(user_id))
         if target is None:
             raise ValueError(f"Blogger not found in config: {user_id}")
 

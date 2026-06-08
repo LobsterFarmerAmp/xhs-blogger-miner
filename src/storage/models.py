@@ -41,9 +41,9 @@ class Post:
     comment_count_value: int = 0
     share_count_raw: str = ""
     share_count_value: int = 0
-    image_urls: list[str] | str = field(default_factory=list)
+    image_urls: list[str] = field(default_factory=list)
     video_url: str = ""
-    tag_list: list[str] | str = field(default_factory=list)
+    tag_list: list[str] = field(default_factory=list)
     ip_location: str = ""
     xsec_token: str = ""
     crawled_at: str = field(default_factory=utc_now_iso)

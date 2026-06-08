@@ -108,6 +108,50 @@
 
 > ⏳ 待赵铁城逐条回复
 
+> **赵铁城回复 — 2026-06-08 14:55**
+>
+> ## 修复汇总
+>
+> 全部 11 条意见已处理。4🟡 全部修完 + 7🟢 全部落实。
+> 测试: **21/21 passed** ✅
+>
+> ### #1 🟡 `src/__init__.py` 副作用
+> ✅ **已修改** — `src/__init__.py` 只保留 re-export，不再调用 `ensure_mediacrawler_path()`。
+> 调用移到 `src/main.py` 的 `run()` 函数内部，作用域限定为 CLI 入口。
+> 其他模块（crawler.py, browser.py, login.py）的模块级调用保留，因为它们确实需要在 import MediaCrawler 前设置路径。
+>
+> ### #2 🟡 `_with_retries` 异常过于宽泛
+> ✅ **已修改** — 在 `except Exception` 前添加 `except (TypeError, ValueError, AttributeError): raise`，不可恢复的错误直接抛出。
+> 限流检测和退避逻辑保持不变。
+>
+> ### #3 🟡 fallback `normalize_interaction_count` 精度不足
+> ✅ **已修改** — 增加 `"w"/"W"`、`"k"/"K"`、`"m"/"M"` 单位支持；增加 `None` 防御；改用 `round()` 替代 `int()` 减少精度丢失；异常捕获改为 `except (ValueError, TypeError)`。
+>
+> ### #4 🟡 `Post.image_urls` / `Post.tag_list` 类型混乱
+> ✅ **已修改** — 模型层统一为 `list[str]`（删除 `| str`）；`database.py` 写入时仍序列化为 JSON，`get_posts_for_blogger()` 读取时反序列化回 list；测试断言同步更新为 list。
+>
+> ### #5 🟢 冗余 `RuntimeError` 检查
+> ✅ **已修改** — 删除 `_get_blogger_info` 和 `_get_blogger_posts` 中的冗余检查。
+>
+> ### #6 🟢 O(n) 搜索优化
+> ✅ **已修改** — `Pipeline.__init__` 中预构建 `_blogger_index: dict[str, dict]`，`run_one` 改为 O(1) 字典查找。
+>
+> ### #7 🟢 连接池注释
+> ✅ **已修改** — 在 `Database` 类添加并发说明注释，标注当前串行安全，将来并发需切换 aiosqlite。
+>
+> ### #8 🟢 测试覆盖
+> ✅ **已修改** — 新增 `tests/test_config_loader.py`（7 个用例：空列表、缺失 key、非 dict、缺失 user_id/url、合法通过、max_count ≤ 0、默认路径加载）和 `tests/test_crawler_helpers.py`（7 个用例：合法 ID、过短 ID、非法字符、429 检测、中文限流、英文限流、普通错误）。
+> 注意: `_is_xhs_user_id` / `_is_rate_limit_error` 已提取到 `src/utils/crawler_helpers.py` 纯函数模块，避免测试 import 触发 MediaCrawler 依赖链。
+>
+> ### #9 🟢 缺少 uv.lock
+> ✅ **已修改** — `git add uv.lock`。
+>
+> ### #10 🟢 `ensure_mediacrawler_path` 副作用注释
+> ✅ **已修改** — 在 sys.modules 清除循环前添加 HACK 注释，说明原因和长期 TODO。
+>
+> ### #11 🟢 `.env.example` 缺少 `MEDIACRAWLER_PATH`
+> ✅ **已修改** — 添加 `# MEDIACRAWLER_PATH=~/.openclaw/tools/MediaCrawler` 注释行。
+
 ---
 <!-- 
   格式说明：

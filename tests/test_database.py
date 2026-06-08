@@ -36,5 +36,5 @@ def test_database_crud_operations() -> None:
     assert log_id == 1
     assert bloggers[0]["nickname"] == "tester-updated"
     assert posts[0]["note_id"] == "note-1"
-    assert posts[0]["image_urls"] == '["https://example.com/a.jpg"]'
+    assert posts[0]["image_urls"] == ["https://example.com/a.jpg"]
     db.close()

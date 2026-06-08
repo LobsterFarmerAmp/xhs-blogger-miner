@@ -11,13 +11,27 @@ ensure_mediacrawler_path()
 try:
     from tools.crawler_util import normalize_interaction_count
 except ImportError:
-    def normalize_interaction_count(count_str: str) -> dict[str, int | str]:
-        raw = str(count_str).strip() if count_str else ""
+    def normalize_interaction_count(count_str: str | None) -> dict[str, int | str]:
+        if count_str is None:
+            return {"raw": "", "value": 0}
+        raw = str(count_str).strip()
+        if not raw:
+            return {"raw": raw, "value": 0}
         try:
-            value = int(float(raw[:-1]) * 10000) if raw.endswith("万") else int(float(raw or 0))
-        except ValueError:
-            value = 0
-        return {"raw": raw, "value": value}
+            lower = raw.lower()
+            if lower.endswith("w"):
+                value = round(float(raw[:-1]) * 10000)
+            elif lower.endswith("万"):
+                value = round(float(raw[:-1]) * 10000)
+            elif lower.endswith("k"):
+                value = round(float(raw[:-1]) * 1000)
+            elif lower.endswith("m"):
+                value = round(float(raw[:-1]) * 1000000)
+            else:
+                value = int(float(raw))
+            return {"raw": raw, "value": value}
+        except (ValueError, TypeError):
+            return {"raw": raw, "value": 0}
 
 
 class PostExtractor:

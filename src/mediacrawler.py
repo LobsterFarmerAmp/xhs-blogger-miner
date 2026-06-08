@@ -15,6 +15,12 @@ def ensure_mediacrawler_path() -> None:
     if path not in sys.path:
         sys.path.insert(0, path)
 
+    # HACK: Clear cached 'config' modules to avoid namespace collision between
+    # MediaCrawler's `config` package and our own `config/` directory. Without
+    # this, Python may resolve `import config` to the wrong path. This affects
+    # only modules whose __file__ is outside MEDIACRAWLER_PATH.
+    # TODO: Long-term fix - give MediaCrawler a namespace-package config or
+    # rename its config module to avoid the conflict entirely.
     for module_name in list(sys.modules):
         if module_name != "config" and not module_name.startswith("config."):
             continue

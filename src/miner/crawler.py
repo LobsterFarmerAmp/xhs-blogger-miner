@@ -9,21 +9,12 @@ from typing import Any
 from src.extractor.blogger import BloggerExtractor
 from src.extractor.post import PostExtractor
 from src.mediacrawler import ensure_mediacrawler_path
-from src.miner.browser import CDPBrowserManager
 from src.miner.human_sim import HumanSimulator
-from src.miner.login import ensure_login
+from src.utils.crawler_helpers import is_rate_limit_error, is_xhs_user_id
 from src.storage.database import Database
 from src.storage.models import CrawlLog, utc_now_iso
 
 ensure_mediacrawler_path()
-
-import config as mediacrawler_config
-from media_platform.xhs.client import XiaoHongShuClient
-from media_platform.xhs.help import parse_creator_info_from_url
-from tools import utils as mediacrawler_utils
-
-RATE_LIMIT_ERROR_MARKERS = ("429", "rate limit", "too many requests", "\u9891\u7e41")
-XHS_USER_ID_CHARS = set("0123456789abcdefABCDEF")
 
 
 @dataclass(slots=True)
@@ -50,10 +41,10 @@ class BloggerCrawler:
         self.logger = logging.getLogger("xhs_miner.crawler")
         self.blogger_extractor = BloggerExtractor()
         self.post_extractor = PostExtractor()
-        self.browser_manager: CDPBrowserManager | None = None
+        self.browser_manager: Any | None = None
         self.browser_context = None
         self.context_page = None
-        self.xhs_client: XiaoHongShuClient | None = None
+        self.xhs_client: Any | None = None
         self.index_url = "https://www.xiaohongshu.com"
         self.cookie_urls = [self.index_url]
 
@@ -118,8 +109,6 @@ class BloggerCrawler:
         )
 
     async def _get_blogger_info(self, blogger_config: dict[str, Any]) -> dict[str, Any]:
-        if self.xhs_client is None:
-            raise RuntimeError("XHS client is not initialized")
         creator = self._parse_creator(blogger_config)
         return await self._with_retries(
             self.xhs_client.get_creator_info,
@@ -129,9 +118,6 @@ class BloggerCrawler:
         )
 
     async def _get_blogger_posts(self, blogger_config: dict[str, Any]) -> list[dict[str, Any]]:
-        if self.xhs_client is None:
-            raise RuntimeError("XHS client is not initialized")
-
         creator = self._parse_creator(blogger_config)
         max_count = int(
             (blogger_config.get("notes") or {}).get(
@@ -189,6 +175,9 @@ class BloggerCrawler:
         if self.xhs_client is not None:
             return
 
+        from src.miner.browser import CDPBrowserManager
+        from src.miner.login import ensure_login
+
         self._apply_mediacrawler_config()
         self.browser_manager = CDPBrowserManager(
             debug_port=int(getattr(self.config, "CDP_DEBUG_PORT", 9222)),
@@ -212,7 +201,10 @@ class BloggerCrawler:
                 urls=self.cookie_urls,
             )
 
-    async def _create_xhs_client(self) -> XiaoHongShuClient:
+    async def _create_xhs_client(self) -> Any:
+        from media_platform.xhs.client import XiaoHongShuClient
+        from tools import utils as mediacrawler_utils
+
         cookie_str, cookie_dict = await mediacrawler_utils.convert_browser_context_cookies(
             self.browser_context,
             urls=self.cookie_urls,
@@ -247,11 +239,13 @@ class BloggerCrawler:
         for attempt in range(1, retries + 1):
             try:
                 return await func(*args, **kwargs)
+            except (TypeError, ValueError, AttributeError):
+                raise
             except Exception as exc:
                 last_error = exc
                 if attempt == retries:
                     break
-                if _is_rate_limit_error(exc):
+                if is_rate_limit_error(exc):
                     sleep_time = min(
                         2**attempt + random.uniform(0, 1),
                         self.config.CRAWLER_MAX_SLEEP_SEC,
@@ -270,6 +264,8 @@ class BloggerCrawler:
             self.xhs_client = None
 
     def _apply_mediacrawler_config(self) -> None:
+        import config as mediacrawler_config
+
         mediacrawler_config.PLATFORM = "xhs"
         mediacrawler_config.CRAWLER_TYPE = self.config.XHS_CRAWLER_TYPE
         mediacrawler_config.COOKIES = self.config.COOKIES
@@ -287,6 +283,8 @@ class BloggerCrawler:
     def _parse_creator(self, blogger_config: dict[str, Any]) -> CreatorTarget:
         homepage_url = str(blogger_config.get("homepage_url") or "").strip()
         if homepage_url:
+            from media_platform.xhs.help import parse_creator_info_from_url
+
             creator = parse_creator_info_from_url(homepage_url)
             return CreatorTarget(
                 user_id=creator.user_id,
@@ -295,7 +293,7 @@ class BloggerCrawler:
             )
 
         user_id = str(blogger_config.get("user_id") or "").strip()
-        if _is_xhs_user_id(user_id):
+        if is_xhs_user_id(user_id):
             return CreatorTarget(user_id=user_id)
 
         raise ValueError(
@@ -307,10 +305,4 @@ class BloggerCrawler:
         return self._parse_creator(blogger_config).user_id
 
 
-def _is_xhs_user_id(value: str) -> bool:
-    return len(value) == 24 and all(char in XHS_USER_ID_CHARS for char in value)
 
-
-def _is_rate_limit_error(exc: Exception) -> bool:
-    message = str(exc).casefold()
-    return any(marker in message for marker in RATE_LIMIT_ERROR_MARKERS)

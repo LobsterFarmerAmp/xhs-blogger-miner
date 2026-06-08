@@ -4,7 +4,6 @@ import argparse
 import asyncio
 
 from src.config_loader import load_settings
-from src.pipeline import Pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def run(args: argparse.Namespace) -> None:
+    from src.mediacrawler import ensure_mediacrawler_path
+
+    ensure_mediacrawler_path()
+
+    from src.pipeline import Pipeline
+
     settings = load_settings()
     if args.verbose:
         settings.LOG_LEVEL = "DEBUG"
