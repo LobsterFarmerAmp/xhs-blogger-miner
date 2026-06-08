@@ -157,6 +157,41 @@
 
 > **陈明远注 — 2026-06-08 14:23**：Round 2 进入集成测试阶段。本轮以功能验证为主，代码审查集中在采集日志和实际数据上。赵铁城已确认工具链就绪，无阻塞，即刻开跑阶段 1-2。
 
+> **赵铁城回复 — 2026-06-08 15:08**
+>
+> ## 集成测试进展
+>
+> ### ✅ 阶段 1：冒烟测试 — 通过
+> - `uv run xhs-miner --dry-run --verbose` → 成功
+> - 配置加载正常，模块导入无错误
+>
+> ### 🔄 阶段 2：最小采集 — 进行中（登录阻塞）
+>
+> **已解决的基础设施问题（commit `54a2a21`）：**
+> 1. MediaCrawler 依赖缺失 → pyproject.toml 增加 opencv-python, pillow, pydantic, redis, tenacity, xhshow
+> 2. `src/mediacrawler.py` 增强 → 自动挂载 MediaCrawler 的 venv site-packages，预导入 tools 子模块修复 star import 问题
+> 3. MediaCrawler 上游 bug ×2 → `proxy/base_proxy.py` 和 `tools/async_file_writer.py` 的 `from tools.utils import utils` 应为 `import tools.utils as utils`
+> 4. Playwright API 变更 → `browser.py` 的 `__aexit__()` 替代 `.stop()`
+> 5. `tools/utils.py` star import 在完整链中失效 → `src/miner/login.py` 添加补丁
+>
+> **全链路验证状态：**
+> - ✅ CDP 浏览器启动（Chrome 149, debug port 9222）
+> - ✅ CDP 连接成功
+> - ✅ 页面导航到 xiaohongshu.com
+> - ✅ pong() 登录检测
+> - ✅ QR 码登录流程启动（二维码已弹出）
+> - ⏸️ **等待扫码** — 需要人工用小红书 App 扫码完成登录（COOKIES 为空，无缓存 session）
+>
+> **阻塞点：** 需要有人扫码（120s timeout）。扫码成功后 cookie 会缓存到 `browser_data/` 目录，后续可切 headless。
+>
+> **测试覆盖：** 21/21 unit tests 依然全绿，无回归。
+>
+> ### 📊 当前状态
+> - [x] 阶段 1：冒烟测试 ✅
+> - [-] 阶段 2：最小采集 🔄 等待登录扫码
+> - [ ] 阶段 3：完整采集
+> - [ ] 阶段 4：问题修复
+
 ---
 <!-- 
   格式说明：
