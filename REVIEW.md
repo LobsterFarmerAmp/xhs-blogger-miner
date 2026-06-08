@@ -249,3 +249,75 @@
 > | #17 | WPM/错字率/退格修正/词间停顿 全部实现 | ✅ |
 >
 > **Round 3 关闭 ✅**
+
+---
+
+## Round 4 - 2026-06-08 16:35 代码深度审查
+
+### 审查摘要
+- **审查人**: 陈明远
+- **审查范围**: 全项目深度代码审查（无新提交，主动发现遗留问题）
+- **代码状态**: 21/21 tests passed，Round 1-3 全部关闭
+- **本轮原则**: 纯代码质量审查，不涉及任何实操
+- **发现**: 5 项新问题，聚焦登录模块健壮性、行为模拟真实性、HTTP 错误处理精度
+
+### 修改意见
+
+#### #18 login.py 运行时 monkey-patch 过于脆弱
+- **严重程度**: 🔴 严重
+- **涉及文件**: `src/miner/login.py:23-49`
+- **问题描述**: `ensure_login()` 中有一个 26 行的大型 HACK 块，通过对 `tools.utils` 模块做运行时 monkey-patch（双重遍历：先 `__all__` 再 `dir()` 扫描可调用对象），为 MediaCrawler 的 login 代码补丁缺失的导入名。这段代码：
+  1. 最外层 `except Exception: pass` 完全静默所有 patch 失败——如果 MediaCrawler 升级后 `tools.crawler_util` 改名，这里会静默跳过，login 静默失败，极难排查
+  2. 内层两个 `except Exception: pass` 同样静默吞错
+  3. 运行时 `setattr` 修改第三方模块的属性是极端脆弱的技术，MediaCrawler 任何微小的内部重构都可能让这里的假设失效，且不会产生任何报错
+- **修改建议**: 
+  1. **至少加日志**：每个 `except` 分支用 `logging.getLogger(__name__).warning()` 记录哪个模块 patch 失败
+  2. **长期方案**（作为 TODO 注释）：推动 MediaCrawler 上游修复 `tools/utils.py` 的 star import，或用 `patch_xhs_login()` 独立函数封装，失败时显式 `raise RuntimeError`
+  3. 将整个 monkey-patch 逻辑提取为独立函数 `_patch_media_crawler_tools_utils()`，在 `ensure_login` 中调用
+
+#### #19 `_bezier_move` 起始点始终为视口中心
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/miner/human_sim.py:40-43`
+- **问题描述**: 贝塞尔曲线 `_bezier_move` 的起点硬编码为 `viewport.width//2, viewport.height//2`，而不是鼠标的实际当前位置。这意味着连续多次 `move_mouse_randomly` 时，每次 new bezier 都会从中心"瞬移"开始，而不是从上一段曲线的终点平滑衔接。Playwright 的 `page.mouse.move` 会更新鼠标的内部位置状态，但 `_bezier_move` 并没有利用这个状态。
+- **修改建议**: 
+  1. 维护 `HumanSimulator` 的内部状态 `self._last_mouse_x`, `self._last_mouse_y`
+  2. 每次 `_bezier_move` 结束后更新这两个值
+  3. 下次调用时从上次的终点开始
+  4. 或者改为 `@staticmethod` 并接收 `start_x, start_y` 参数，由调用方决定起点
+
+#### #20 `_RETRYABLE_EXCEPTIONS` 不涵盖 httpx 网络错误
+- **严重程度**: 🟡 一般
+- **涉及文件**: `src/miner/crawler.py:21-25`
+- **问题描述**: `_RETRYABLE_EXCEPTIONS = (asyncio.TimeoutError, ConnectionError, OSError)` 中，`ConnectionError` 是 Python 内置异常（socket 级），但底层使用 `XiaoHongShuClient`（基于 httpx），实际抛出的网络错误类型是 `httpx.ConnectError`, `httpx.ReadError`, `httpx.RemoteProtocolError` 等，均继承自 `httpx.HTTPError`。当前代码中这些 httpx 异常会穿透重试逻辑直接抛给外层 `crawl_blogger` 的 `except Exception`，导致整个博主采集失败，而不是重试。
+- **修改建议**: 
+  1. 添加 `import httpx` 并在 `_RETRYABLE_EXCEPTIONS` 中增加 `httpx.HTTPError`（或具体子类）
+  2. 注意 httpx 可能未安装（MediaCrawler 依赖链），加 try/except 保护导入：
+  ```python
+  try:
+      import httpx
+      _RETRYABLE_EXCEPTIONS += (httpx.HTTPError,)
+  except ImportError:
+      pass
+  ```
+
+#### #21 `config_loader.validate_bloggers_config` 有副作用
+- **严重程度**: 🟢 建议
+- **涉及文件**: `src/config_loader.py:38`
+- **问题描述**: `validate_bloggers_config()` 中 `item.setdefault("notes", {})` 会原地修改传入的 `data` 字典及其嵌套的 `bloggers` 列表。函数名暗示纯校验，但实际做了数据默认值注入。调用方 `load_bloggers_config` 依赖这个副作用来确保下游代码不需要防御 `notes` 缺失。
+- **修改建议**: 
+  1. 将 `setdefault` 逻辑移到 `load_bloggers_config` 的 validate 调用之后，作为独立的数据标准化步骤
+  2. 或重命名 `validate_bloggers_config` → `validate_and_normalize_bloggers_config` 清楚标记副作用
+  3. 在单元测试中补充对 side-effect 的验证（当前 `test_validate_bloggers_config_valid_passes` 未检查 setdefault）
+
+#### #22 reporter.py 过度使用 `getattr` 绕过类型检查
+- **严重程度**: 🟢 建议
+- **涉及文件**: `src/utils/reporter.py:33,38,70,77-79`
+- **问题描述**: `ReportSummary` 类型已改为 `list[CrawlResult]`，但内部仍然大量使用 `getattr(result, 'posts_found', 0)`、`getattr(result, 'status', '')` 模式。`CrawlResult` 是 `@dataclass(slots=True)` 的，所有属性都是确定存在的。用 `getattr` 加默认值会掩盖属性名拼写错误（例如某天改名为 `posts_discovered`，`getattr` 会静默返回 0 而不报错）。
+- **修改建议**: 直接属性访问替换 `getattr`：`result.posts_found`，`result.blogger_user_id`，`result.status` 等。类型检查器（mypy/pyright）会在属性不存在时直接报错。
+
+### 待办
+- [ ] #18 login.py monkey-patch 健壮性（加日志 + TODO 长期方案）
+- [ ] #19 `_bezier_move` 起点衔接
+- [ ] #20 `_RETRYABLE_EXCEPTIONS` 增加 httpx 错误类型
+- [ ] #21 `validate_bloggers_config` 副作用分离
+- [ ] #22 reporter.py 用直接属性访问替换 `getattr`
