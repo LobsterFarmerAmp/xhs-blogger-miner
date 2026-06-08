@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -14,6 +14,8 @@ class HumanSimulator:
     reading_max_sec: float = 20.0
     page_load_min_sec: float = 3.0
     page_load_max_sec: float = 8.0
+    _last_mouse_x: int = field(default=0, init=False)
+    _last_mouse_y: int = field(default=0, init=False)
 
     async def random_delay(self, min_s: float | None = None, max_s: float | None = None) -> float:
         lower = self.min_delay_sec if min_s is None else min_s
@@ -37,9 +39,12 @@ class HumanSimulator:
         """Move mouse along a cubic bezier curve to the target position."""
         import math as _math
 
-        viewport = page.viewport_size or {"width": 1280, "height": 720}
-        start_x = viewport.get("width", 1280) // 2
-        start_y = viewport.get("height", 720) // 2
+        if self._last_mouse_x or self._last_mouse_y:
+            start_x, start_y = self._last_mouse_x, self._last_mouse_y
+        else:
+            viewport = page.viewport_size or {"width": 1280, "height": 720}
+            start_x = viewport.get("width", 1280) // 2
+            start_y = viewport.get("height", 720) // 2
         cp1_x = start_x + random.randint(-200, 200)
         cp1_y = start_y + random.randint(-150, 150)
         cp2_x = target_x + random.randint(-100, 100)
@@ -61,6 +66,8 @@ class HumanSimulator:
             )
             await page.mouse.move(x, y, steps=1)
             await asyncio.sleep(random.uniform(0.001, 0.005))
+        self._last_mouse_x = target_x
+        self._last_mouse_y = target_y
 
     async def move_mouse_randomly(self, page: Any) -> None:
         viewport = page.viewport_size or {"width": 1280, "height": 720}

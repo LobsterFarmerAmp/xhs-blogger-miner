@@ -29,12 +29,12 @@ class Reporter:
         errors = [
             f"{result.blogger_user_id}: {result.error_message}"
             for result in result_list
-            if getattr(result, "status", "") != "success"
+            if result.status != "success"
         ]
         summary = ReportSummary(
             total_bloggers=len(result_list),
-            total_posts_found=sum(int(getattr(result, "posts_found", 0)) for result in result_list),
-            total_posts_new=sum(int(getattr(result, "posts_new", 0)) for result in result_list),
+            total_posts_found=sum(int(result.posts_found) for result in result_list),
+            total_posts_new=sum(int(result.posts_new) for result in result_list),
             errors=errors,
             elapsed_seconds=elapsed_seconds,
             markdown_path=self._write_markdown(result_list, errors, elapsed_seconds),
@@ -65,8 +65,8 @@ class Reporter:
             "",
             f"- Generated at: {datetime.now(UTC).isoformat()}",
             f"- Total bloggers crawled: {len(results)}",
-            f"- Total posts found: {sum(int(getattr(result, 'posts_found', 0)) for result in results)}",
-            f"- Total posts new: {sum(int(getattr(result, 'posts_new', 0)) for result in results)}",
+            f"- Total posts found: {sum(int(result.posts_found) for result in results)}",
+            f"- Total posts new: {sum(int(result.posts_new) for result in results)}",
             f"- Errors encountered: {len(errors)}",
             f"- Time elapsed: {elapsed_seconds:.2f}s",
             "",
@@ -76,10 +76,10 @@ class Reporter:
         for result in results:
             lines.append(
                 "- "
-                f"{getattr(result, 'blogger_user_id', '')}: "
-                f"status={getattr(result, 'status', '')}, "
-                f"posts_found={getattr(result, 'posts_found', 0)}, "
-                f"posts_new={getattr(result, 'posts_new', 0)}"
+                f"{result.blogger_user_id}: "
+                f"status={result.status}, "
+                f"posts_found={result.posts_found}, "
+                f"posts_new={result.posts_new}"
             )
         if errors:
             lines.extend(["", "## Errors", ""])

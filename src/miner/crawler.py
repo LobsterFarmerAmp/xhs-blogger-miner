@@ -27,6 +27,13 @@ _RETRYABLE_EXCEPTIONS = (
     OSError,
 )
 
+try:
+    import httpx
+
+    _RETRYABLE_EXCEPTIONS += (httpx.HTTPError,)
+except ImportError:
+    pass
+
 
 @dataclass(slots=True)
 class CrawlResult:
@@ -307,5 +314,4 @@ class BloggerCrawler:
 
     def _resolve_user_id(self, blogger_config: dict[str, Any]) -> str:
         return self._parse_creator(blogger_config).user_id
-
 

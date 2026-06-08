@@ -29,11 +29,11 @@ def load_bloggers_config(path: str | Path | None = None) -> dict[str, Any]:
     config_path = Path(path) if path else DEFAULT_BLOGGERS_CONFIG
     with config_path.open("r", encoding="utf-8") as file:
         data = yaml.safe_load(file) or {}
-    validate_bloggers_config(data)
+    validate_and_normalize_bloggers_config(data)
     return data
 
 
-def validate_bloggers_config(data: dict[str, Any]) -> None:
+def validate_and_normalize_bloggers_config(data: dict[str, Any]) -> None:
     bloggers = data.get("bloggers")
     if not isinstance(bloggers, list) or not bloggers:
         raise ValueError("Config must contain a non-empty 'bloggers' list")
