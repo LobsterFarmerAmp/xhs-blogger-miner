@@ -43,11 +43,21 @@ def _get_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None or raw == "":
         return default
-    return int(raw)
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"Environment variable {name} must be an integer, got: {raw!r}"
+        ) from None
 
 
 def _get_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw == "":
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+    value = raw.strip().lower()
+    if value not in {"1", "true", "yes", "y", "on", "0", "false", "no", "n", "off"}:
+        raise ValueError(
+            f"Environment variable {name} must be a boolean, got: {raw!r}"
+        ) from None
+    return value in {"1", "true", "yes", "y", "on"}

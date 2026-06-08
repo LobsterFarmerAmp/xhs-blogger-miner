@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from dataclasses import dataclass, field
 from typing import Any
@@ -119,6 +120,12 @@ class HumanSimulator:
     async def human_page_load(self, page: Any) -> float:
         try:
             await page.wait_for_load_state("networkidle", timeout=30_000)
+        except TimeoutError:
+            await page.wait_for_load_state("domcontentloaded", timeout=30_000)
         except Exception:
+            logging.getLogger(__name__).warning(
+                "Unexpected error during networkidle wait, falling back to domcontentloaded",
+                exc_info=True,
+            )
             await page.wait_for_load_state("domcontentloaded", timeout=30_000)
         return await self.random_delay(self.page_load_min_sec, self.page_load_max_sec)

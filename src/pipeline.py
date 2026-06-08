@@ -18,12 +18,17 @@ class Pipeline:
     def __init__(self, config: Any, bloggers_config_path: str | Path | None = None) -> None:
         self.config = config
         self.bloggers_config = load_bloggers_config(bloggers_config_path)
+        self.logger = setup_logger(level=config.LOG_LEVEL, data_path=config.SAVE_DATA_PATH)
         self._blogger_index: dict[str, dict[str, Any]] = {}
         for item in self.bloggers_config["bloggers"]:
             uid = extract_user_id(item)
             if uid:
+                if uid in self._blogger_index:
+                    self.logger.warning(
+                        "Duplicate blogger user_id '%s' in config, "
+                        "overriding previous entry", uid
+                    )
                 self._blogger_index[uid] = item
-        self.logger = setup_logger(level=config.LOG_LEVEL, data_path=config.SAVE_DATA_PATH)
         self.db = Database(config.DATABASE_PATH)
         self.human_sim = HumanSimulator(
             min_delay_sec=config.CRAWLER_MIN_SLEEP_SEC,
