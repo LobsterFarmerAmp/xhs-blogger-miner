@@ -154,11 +154,38 @@ class BloggerCrawler:
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-                detail = await self._get_post_detail(
-                    note_id,
-                    xsec_token=xsec_token,
-                    xsec_source=str(listing_raw.get("xsec_source") or "pc_feed"),
-                )
+                try:
+                    detail = await self._get_post_detail(
+                        note_id,
+                        xsec_token=xsec_token,
+                        xsec_source=str(listing_raw.get("xsec_source") or "pc_feed"),
+                    )
+                except Exception as exc:
+                    # Unwrap tenacity.RetryError to find root cause
+                    root_cause = exc
+                    last_attempt = getattr(exc, 'last_attempt', None)
+                    if last_attempt is not None:
+                        try:
+                            inner = last_attempt.exception()
+                            if inner is not None:
+                                root_cause = inner
+                        except Exception:
+                            pass
+                    err_msg = str(root_cause)
+                    self.logger.warning(
+                        "Failed to fetch detail for %s: %s",
+                        note_id,
+                        err_msg[:200],
+                    )
+                    # 461 CAPTCHA / security verification: stop Phase 2 early
+                    if "461" in err_msg or "CAPTCHA" in err_msg.lower():
+                        self.logger.warning(
+                            "CAPTCHA/461 detected, stopping Phase 2 early. "
+                            "Remaining posts will be filled on next --resume."
+                        )
+                        break
+                    # Other errors: skip this post, continue with next
+                    continue
                 merged = {**listing_raw, **(detail or {})}
                 merged.setdefault("xsec_token", xsec_token)
                 merged["listing_data"] = listing_data
@@ -202,13 +229,10 @@ class BloggerCrawler:
         )
 
     async def _get_blogger_info(self, blogger_config: dict[str, Any]) -> dict[str, Any]:
+        # Skip HTML scraping (易触发302/重定向/验证), blogger info is non-essential metadata
         creator = self._parse_creator(blogger_config)
-        return await self._with_retries(
-            self.xhs_client.get_creator_info,
-            user_id=creator.user_id,
-            xsec_token=creator.xsec_token,
-            xsec_source=creator.xsec_source,
-        )
+        self.logger.info("Skipping creator info HTML fetch for %s", creator.user_id)
+        return {}
 
     async def _get_blogger_posts(
         self,
@@ -251,6 +275,31 @@ class BloggerCrawler:
             ]
             notes.extend(new_batch)
             has_more = bool(response.get("has_more"))
+            # Early-termination: stop when the majority of posts in a batch are
+            # before 2024-01-01. Uses note_id first 8 hex chars (Unix timestamp sec).
+            # Counts newer-than-cutoff notes: if <50% are new, it's safe to stop.
+            if has_more and batch:
+                CUTOFF_SEC = 1704038400  # 2024-01-01 00:00:00 CST (Unix seconds)
+                newer_count = 0
+                total_with_ts = 0
+                for n in batch:
+                    nid = str(n.get("note_id") or "")
+                    if len(nid) >= 8:
+                        try:
+                            ts = int(nid[:8], 16)
+                            total_with_ts += 1
+                            if ts >= CUTOFF_SEC:
+                                newer_count += 1
+                        except (ValueError, TypeError):
+                            pass
+                if total_with_ts > 0 and newer_count < total_with_ts * 0.5:
+                    self.logger.info(
+                        "Early-termination: only %d/%d notes >= 2024-01-01 cutoff (%.0f%%)",
+                        newer_count,
+                        total_with_ts,
+                        100 * newer_count / total_with_ts,
+                    )
+                    has_more = False
             cursor = str(response.get("cursor") or "")
             if has_more:
                 await self.human_sim.random_delay(
