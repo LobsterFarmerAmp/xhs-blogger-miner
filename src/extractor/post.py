@@ -89,24 +89,44 @@ class PostExtractor:
     ) -> dict[str, Any]:
         """Create a skeletal post record from listing API data for Phase 1 insertion.
 
-        Only includes fields available from the listing endpoint. All detail fields
-        (title, description, counts, media) are intentionally left out so they become
-        NULL in the database, marking this record as needing Phase 2 detail fetch.
-
-        Note: publish_time may be 0 if the listing card doesn't have a top-level
-        'time' field (it can be nested). This is fine; Phase 2 fetch will fill it.
+        Extracts display_title from listing response and decodes publish_time
+        from note_id (first 8 hex chars = Unix timestamp seconds). Fields that
+        are truly unavailable from listing (description, full interact counts,
+        tags) are left NULL for optional Phase 2 detail fetch.
         """
         note_id = str(note_card.get("note_id") or note_card.get("id") or "")
+        publish_time = self._decode_note_id_timestamp(note_id)
+        title = str(note_card.get("display_title") or note_card.get("title") or "")
         return {
             "note_id": note_id,
             "blogger_user_id": blogger_user_id,
             "type": str(note_card.get("type") or ""),
-            "publish_time": int(note_card.get("time") or 0),
+            "title": title,
+            "publish_time": publish_time,
             "last_update_time": int(note_card.get("last_update_time") or 0),
             "note_url": self._note_url(note_id, note_card),
             "xsec_token": str(note_card.get("xsec_token") or ""),
             "listing_data": json.dumps(note_card, ensure_ascii=False),
         }
+
+    @staticmethod
+    def decode_note_id_timestamp(note_id: str) -> int:
+        """Decode publish_time from note_id first 8 hex chars.
+
+        XHS note_id format: first 8 chars = hex-encoded Unix timestamp (seconds).
+        Example: 6a27fa08 -> int(0x6a27fa08) = 1781029384.
+
+        Returns 0 if note_id is too short or not valid hex.
+        """
+        if len(note_id) >= 8:
+            try:
+                return int(note_id[:8], 16)
+            except (ValueError, TypeError):
+                pass
+        return 0
+
+    def _decode_note_id_timestamp(self, note_id: str) -> int:
+        return self.decode_note_id_timestamp(note_id)
 
     @staticmethod
     def normalize_count(count: Any) -> dict[str, int | str]:
