@@ -37,6 +37,19 @@ except ImportError:
     pass
 
 
+def _unwrap_retry_error(exc: BaseException) -> BaseException:
+    """Unwrap tenacity.RetryError to find the root cause exception."""
+    last_attempt = getattr(exc, 'last_attempt', None)
+    if last_attempt is not None:
+        try:
+            inner = last_attempt.exception()
+            if inner is not None:
+                return inner
+        except Exception:
+            pass
+    return exc
+
+
 @dataclass(slots=True)
 class CrawlResult:
     blogger_user_id: str
@@ -111,98 +124,14 @@ class BloggerCrawler:
             )
             self.db.upsert_blogger(blogger)
 
-            post_cards = await self._get_blogger_posts(
+            posts_found, posts_new = await self._crawl_posts_interleaved(
                 blogger_config,
+                user_id=user_id,
                 collected_note_ids=collected_note_ids,
+                resume=resume,
             )
-            posts_found = len(post_cards)
             if resume:
                 posts_found += len(collected_note_ids)
-
-            listing_new = 0
-            for post_card in post_cards:
-                listing_record = self.post_extractor.extract_listing_post(
-                    post_card, user_id
-                )
-                if self.db.upsert_post(listing_record):
-                    listing_new += 1
-
-            self.logger.info(
-                "Phase 1 listing complete: found=%d new=%d for blogger %s",
-                posts_found,
-                listing_new,
-                user_id,
-            )
-
-            detail_posts = self.db.get_posts_without_detail(user_id)
-            self.logger.info(
-                "Phase 2 fetch: %d posts need detail for blogger %s",
-                len(detail_posts),
-                user_id,
-            )
-
-            for post_record in detail_posts:
-                note_id = str(post_record.get("note_id") or "")
-                xsec_token = str(post_record.get("xsec_token") or "")
-                listing_data = str(post_record.get("listing_data") or "")
-
-                listing_raw: dict[str, Any] = {}
-                try:
-                    parsed_listing = json.loads(listing_data or "{}")
-                    if isinstance(parsed_listing, dict):
-                        listing_raw = parsed_listing
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
-                try:
-                    detail = await self._get_post_detail(
-                        note_id,
-                        xsec_token=xsec_token,
-                        xsec_source=str(listing_raw.get("xsec_source") or "pc_feed"),
-                    )
-                except Exception as exc:
-                    # Unwrap tenacity.RetryError to find root cause
-                    root_cause = exc
-                    last_attempt = getattr(exc, 'last_attempt', None)
-                    if last_attempt is not None:
-                        try:
-                            inner = last_attempt.exception()
-                            if inner is not None:
-                                root_cause = inner
-                        except Exception:
-                            pass
-                    err_msg = str(root_cause)
-                    self.logger.warning(
-                        "Failed to fetch detail for %s: %s",
-                        note_id,
-                        err_msg[:200],
-                    )
-                    # 461 CAPTCHA / security verification: stop Phase 2 early
-                    if "461" in err_msg or "CAPTCHA" in err_msg.lower():
-                        self.logger.warning(
-                            "CAPTCHA/461 detected, stopping Phase 2 early. "
-                            "Remaining posts will be filled on next --resume."
-                        )
-                        break
-                    # Other errors: skip this post, continue with next
-                    continue
-                merged = {**listing_raw, **(detail or {})}
-                merged.setdefault("xsec_token", xsec_token)
-                merged["listing_data"] = listing_data
-
-                full_post = self.post_extractor.extract_post_data(
-                    merged,
-                    blogger_user_id=user_id,
-                    listing_data=listing_data,
-                )
-                full_post.listing_data = listing_data
-
-                self.db.upsert_post(full_post)
-                posts_new += 1
-                await self.human_sim.random_delay(
-                    self.config.CRAWLER_MIN_SLEEP_SEC,
-                    self.config.CRAWLER_MAX_SLEEP_SEC,
-                )
         except Exception as exc:
             status = "failed"
             error_message = str(exc)
@@ -234,11 +163,24 @@ class BloggerCrawler:
         self.logger.info("Skipping creator info HTML fetch for %s", creator.user_id)
         return {}
 
-    async def _get_blogger_posts(
+    async def _crawl_posts_interleaved(
         self,
         blogger_config: dict[str, Any],
-        collected_note_ids: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+        user_id: str,
+        collected_note_ids: set[str],
+        resume: bool = False,
+    ) -> tuple[int, int]:
+        """Paginate listing and immediately fetch detail for each new post.
+
+        Interleaves listing pagination and detail fetch so that detail API
+        calls are scattered across page transitions, mimicking natural
+        browsing rhythm (浏览→点帖→返回→翻页→浏览→...) instead of firing
+        all detail requests in one concentrated burst.
+
+        Returns (posts_found, posts_new) where posts_found is the total
+        number of listing cards scanned, and posts_new is the number of
+        detail fetch + upsert succeeded.
+        """
         creator = self._parse_creator(blogger_config)
         max_count = int(
             (blogger_config.get("notes") or {}).get(
@@ -246,14 +188,16 @@ class BloggerCrawler:
                 self.config.CRAWLER_MAX_POSTS_PER_BLOGGER,
             )
         )
-        collected_note_ids = collected_note_ids or set()
-        notes: list[dict[str, Any]] = []
-        posts_seen = 0
+        posts_found = 0
+        posts_new = 0
         cursor = ""
         has_more = True
+        page_idx = 0
+        CUTOFF_SEC = 1704038400  # 2024-01-01 00:00:00 CST
 
-        while has_more and posts_seen < max_count:
-            page_size = min(30, max_count - posts_seen)
+        while has_more and posts_found < max_count:
+            page_idx += 1
+            page_size = min(30, max_count - posts_found)
             response = await self._with_retries(
                 self.xhs_client.get_notes_by_creator,
                 creator=creator.user_id,
@@ -265,21 +209,75 @@ class BloggerCrawler:
             if not response:
                 break
             batch = response.get("notes") or []
-            batch = batch[: max_count - posts_seen]
-            posts_seen += len(batch)
-            new_batch = [
-                note
-                for note in batch
-                if str(note.get("note_id") or note.get("id") or "")
-                not in collected_note_ids
+            batch = batch[: max_count - posts_found]
+            posts_found += len(batch)
+
+            # Filter already-collected notes
+            new_notes = [
+                n for n in batch
+                if str(n.get("note_id") or n.get("id") or "") not in collected_note_ids
             ]
-            notes.extend(new_batch)
+
+            self.logger.info(
+                "Page %d: %d notes, %d new, %d total scanned",
+                page_idx, len(batch), len(new_notes), posts_found,
+            )
+
+            # Process each new note: fetch detail immediately, merge, upsert
+            for note_card in new_notes:
+                note_id = str(note_card.get("note_id") or "")
+                xsec_token = str(note_card.get("xsec_token") or "")
+
+                listing_raw: dict[str, Any] = dict(note_card)
+                try:
+                    detail = await self._get_post_detail(
+                        note_id,
+                        xsec_token=xsec_token,
+                        xsec_source=str(note_card.get("xsec_source") or "pc_feed"),
+                    )
+                except Exception as exc:
+                    root_cause = _unwrap_retry_error(exc)
+                    err_msg = str(root_cause)
+                    self.logger.warning(
+                        "Failed to fetch detail for %s: %s",
+                        note_id, err_msg[:200],
+                    )
+                    # 461 CAPTCHA: stop entire crawl immediately
+                    if "461" in err_msg or "CAPTCHA" in err_msg.lower():
+                        self.logger.warning(
+                            "461 CAPTCHA detected — stopping crawl. "
+                            "%d posts collected so far. Cool down ≥24h.",
+                            posts_new,
+                        )
+                        return posts_found, posts_new
+                    # Other errors: save listing skeleton, skip detail
+                    listing_record = self.post_extractor.extract_listing_post(
+                        note_card, user_id
+                    )
+                    self.db.upsert_post(listing_record)
+                    continue
+
+                merged = {**listing_raw, **(detail or {})}
+                merged.setdefault("xsec_token", xsec_token)
+                merged["listing_data"] = json.dumps(note_card, ensure_ascii=False)
+
+                full_post = self.post_extractor.extract_post_data(
+                    merged,
+                    blogger_user_id=user_id,
+                )
+                self.db.upsert_post(full_post)
+                posts_new += 1
+                collected_note_ids.add(note_id)
+
+                # Inter-post delay: mimic reading time
+                await self.human_sim.random_delay(
+                    max(8, self.config.CRAWLER_MIN_SLEEP_SEC),
+                    max(20, self.config.CRAWLER_MAX_SLEEP_SEC),
+                )
+
+            # Early-termination: majority of batch < 2024-01-01
             has_more = bool(response.get("has_more"))
-            # Early-termination: stop when the majority of posts in a batch are
-            # before 2024-01-01. Uses note_id first 8 hex chars (Unix timestamp sec).
-            # Counts newer-than-cutoff notes: if <50% are new, it's safe to stop.
             if has_more and batch:
-                CUTOFF_SEC = 1704038400  # 2024-01-01 00:00:00 CST (Unix seconds)
                 newer_count = 0
                 total_with_ts = 0
                 for n in batch:
@@ -294,20 +292,39 @@ class BloggerCrawler:
                             pass
                 if total_with_ts > 0 and newer_count < total_with_ts * 0.5:
                     self.logger.info(
-                        "Early-termination: only %d/%d notes >= 2024-01-01 cutoff (%.0f%%)",
-                        newer_count,
-                        total_with_ts,
+                        "Early-termination: only %d/%d notes ≥ 2024-01-01 (%.0f%%)",
+                        newer_count, total_with_ts,
                         100 * newer_count / total_with_ts,
                     )
                     has_more = False
+
             cursor = str(response.get("cursor") or "")
             if has_more:
+                # Inter-page delay: mimic switching between feeds
                 await self.human_sim.random_delay(
-                    self.config.CRAWLER_MIN_SLEEP_SEC,
-                    self.config.CRAWLER_MAX_SLEEP_SEC,
+                    max(15, self.config.CRAWLER_MIN_SLEEP_SEC),
+                    max(30, self.config.CRAWLER_MAX_SLEEP_SEC),
                 )
+                # Behavior camouflage: every 2 pages, hit a non-crawl endpoint
+                if page_idx % 2 == 0:
+                    await self._camouflage_request()
 
-        return notes
+        return posts_found, posts_new
+
+    async def _camouflage_request(self) -> None:
+        """Issue a non-crawl request to break predictable endpoint patterns."""
+        try:
+            await self._with_retries(
+                self.xhs_client.get_notes_by_creator,
+                creator=self.xhs_client.user_id if hasattr(self.xhs_client, 'user_id') else "",
+                cursor="",
+                page_size=1,
+                xsec_token="",
+                xsec_source="pc_feed",
+            )
+            self.logger.debug("Camouflage request OK")
+        except Exception:
+            self.logger.debug("Camouflage request failed (non-critical)")
 
     async def _get_post_detail(
         self,

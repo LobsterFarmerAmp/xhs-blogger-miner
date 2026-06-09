@@ -64,6 +64,7 @@ def test_listing_post_extraction_creates_skeletal_record() -> None:
         "note_id",
         "blogger_user_id",
         "type",
+        "title",
         "publish_time",
         "last_update_time",
         "note_url",

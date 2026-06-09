@@ -87,12 +87,12 @@ class PostExtractor:
     def extract_listing_post(
         self, note_card: dict[str, Any], blogger_user_id: str
     ) -> dict[str, Any]:
-        """Create a skeletal post record from listing API data for Phase 1 insertion.
+        """Create a skeletal post record from listing API data.
 
-        Extracts display_title from listing response and decodes publish_time
-        from note_id (first 8 hex chars = Unix timestamp seconds). Fields that
-        are truly unavailable from listing (description, full interact counts,
-        tags) are left NULL for optional Phase 2 detail fetch.
+        Used as fallback when detail fetch fails — preserves listing-level
+        fields (title, publish_time, xsec_token, etc.) so the post is at
+        least partially available. Fields that require detail API
+        (full description, interact counts, tags, media) are left empty.
         """
         note_id = str(note_card.get("note_id") or note_card.get("id") or "")
         publish_time = self._decode_note_id_timestamp(note_id)
