@@ -1,3 +1,5 @@
+import json
+
 from src.extractor.blogger import BloggerExtractor
 from src.extractor.post import PostExtractor
 
@@ -31,6 +33,45 @@ def test_post_extraction_shapes_media_and_tags() -> None:
     assert post.liked_count_value == 22000
     assert post.image_urls == ["https://example.com/a.jpg"]
     assert post.tag_list == ["topic"]
+
+
+def test_post_extraction_preserves_listing_data() -> None:
+    post = PostExtractor().extract_post_data(
+        {
+            "note_id": "note-1",
+            "title": "A note",
+            "user": {"user_id": "user-1"},
+            "listing_data": "from-card",
+        },
+        listing_data="from-db",
+    )
+
+    assert post.listing_data == "from-db"
+
+
+def test_listing_post_extraction_creates_skeletal_record() -> None:
+    note_card = {
+        "note_id": "note-1",
+        "type": "normal",
+        "last_update_time": 123,
+        "xsec_token": "token-1",
+        "note_card": {"time": 456},
+    }
+
+    record = PostExtractor().extract_listing_post(note_card, "user-1")
+
+    assert set(record) == {
+        "note_id",
+        "blogger_user_id",
+        "type",
+        "publish_time",
+        "last_update_time",
+        "note_url",
+        "xsec_token",
+        "listing_data",
+    }
+    assert record["publish_time"] == 0
+    assert json.loads(record["listing_data"]) == note_card
 
 
 def test_blogger_extraction_normalizes_counts() -> None:

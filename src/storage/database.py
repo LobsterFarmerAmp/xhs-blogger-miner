@@ -44,6 +44,11 @@ class Database:
             conn.execute("PRAGMA foreign_keys = ON")
             for ddl in TABLE_DDL:
                 conn.executescript(ddl)
+            post_columns = {
+                str(row["name"]) for row in conn.execute("PRAGMA table_info(posts)")
+            }
+            if "listing_data" not in post_columns:
+                conn.execute("ALTER TABLE posts ADD COLUMN listing_data TEXT")
 
     def upsert_blogger(self, blogger: Blogger | dict[str, Any]) -> None:
         data = _to_record(blogger)
@@ -61,8 +66,10 @@ class Database:
 
     def upsert_post(self, post: Post | dict[str, Any]) -> bool:
         data = _to_record(post)
-        data["image_urls"] = _json_or_text(data.get("image_urls", []))
-        data["tag_list"] = _json_or_text(data.get("tag_list", []))
+        if "image_urls" in data:
+            data["image_urls"] = _json_or_text(data["image_urls"])
+        if "tag_list" in data:
+            data["tag_list"] = _json_or_text(data["tag_list"])
 
         with self.connection() as conn:
             exists = conn.execute(
@@ -104,6 +111,26 @@ class Database:
         with self.connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM posts WHERE blogger_user_id = ? ORDER BY publish_time DESC",
+                (blogger_user_id,),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                for field in ("image_urls", "tag_list"):
+                    raw = d.get(field)
+                    if isinstance(raw, str):
+                        try:
+                            d[field] = json.loads(raw)
+                        except json.JSONDecodeError:
+                            d[field] = []
+                result.append(d)
+            return result
+
+    def get_posts_without_detail(self, blogger_user_id: str) -> list[dict[str, Any]]:
+        """Return posts inserted during listing that haven't had detail fetched."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM posts WHERE blogger_user_id = ? AND title IS NULL",
                 (blogger_user_id,),
             ).fetchall()
             result = []

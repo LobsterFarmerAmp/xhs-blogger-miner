@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 from dataclasses import dataclass
@@ -117,16 +118,60 @@ class BloggerCrawler:
             posts_found = len(post_cards)
             if resume:
                 posts_found += len(collected_note_ids)
+
+            listing_new = 0
             for post_card in post_cards:
-                detail = await self._get_post_detail(
-                    str(post_card.get("note_id") or post_card.get("id") or ""),
-                    str(post_card.get("xsec_token") or ""),
-                    str(post_card.get("xsec_source") or "pc_feed"),
+                listing_record = self.post_extractor.extract_listing_post(
+                    post_card, user_id
                 )
-                merged = {**post_card, **(detail or {})}
-                merged.setdefault("xsec_token", post_card.get("xsec_token", ""))
-                if await self._process_post(merged, user_id):
-                    posts_new += 1
+                if self.db.upsert_post(listing_record):
+                    listing_new += 1
+
+            self.logger.info(
+                "Phase 1 listing complete: found=%d new=%d for blogger %s",
+                posts_found,
+                listing_new,
+                user_id,
+            )
+
+            detail_posts = self.db.get_posts_without_detail(user_id)
+            self.logger.info(
+                "Phase 2 fetch: %d posts need detail for blogger %s",
+                len(detail_posts),
+                user_id,
+            )
+
+            for post_record in detail_posts:
+                note_id = str(post_record.get("note_id") or "")
+                xsec_token = str(post_record.get("xsec_token") or "")
+                listing_data = str(post_record.get("listing_data") or "")
+
+                listing_raw: dict[str, Any] = {}
+                try:
+                    parsed_listing = json.loads(listing_data or "{}")
+                    if isinstance(parsed_listing, dict):
+                        listing_raw = parsed_listing
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                detail = await self._get_post_detail(
+                    note_id,
+                    xsec_token=xsec_token,
+                    xsec_source=str(listing_raw.get("xsec_source") or "pc_feed"),
+                )
+                merged = {**listing_raw, **(detail or {})}
+                merged.setdefault("xsec_token", xsec_token)
+                merged["listing_data"] = listing_data
+
+                full_post = self.post_extractor.extract_post_data(
+                    merged,
+                    blogger_user_id=user_id,
+                    listing_data=listing_data,
+                )
+                full_post.listing_data = listing_data
+
+                self.db.upsert_post(full_post)
+                posts_new += 1
                 await self.human_sim.random_delay(
                     self.config.CRAWLER_MIN_SLEEP_SEC,
                     self.config.CRAWLER_MAX_SLEEP_SEC,

@@ -39,6 +39,7 @@ class PostExtractor:
         self,
         note_card: dict[str, Any],
         blogger_user_id: str | None = None,
+        listing_data: str = "",
     ) -> Post:
         user_info = note_card.get("user") or {}
         interact_info = note_card.get("interact_info") or {}
@@ -80,7 +81,32 @@ class PostExtractor:
             tag_list=self._extract_tags(note_card),
             ip_location=str(note_card.get("ip_location") or ""),
             xsec_token=str(note_card.get("xsec_token") or ""),
+            listing_data=listing_data or note_card.get("listing_data", ""),
         )
+
+    def extract_listing_post(
+        self, note_card: dict[str, Any], blogger_user_id: str
+    ) -> dict[str, Any]:
+        """Create a skeletal post record from listing API data for Phase 1 insertion.
+
+        Only includes fields available from the listing endpoint. All detail fields
+        (title, description, counts, media) are intentionally left out so they become
+        NULL in the database, marking this record as needing Phase 2 detail fetch.
+
+        Note: publish_time may be 0 if the listing card doesn't have a top-level
+        'time' field (it can be nested). This is fine; Phase 2 fetch will fill it.
+        """
+        note_id = str(note_card.get("note_id") or note_card.get("id") or "")
+        return {
+            "note_id": note_id,
+            "blogger_user_id": blogger_user_id,
+            "type": str(note_card.get("type") or ""),
+            "publish_time": int(note_card.get("time") or 0),
+            "last_update_time": int(note_card.get("last_update_time") or 0),
+            "note_url": self._note_url(note_id, note_card),
+            "xsec_token": str(note_card.get("xsec_token") or ""),
+            "listing_data": json.dumps(note_card, ensure_ascii=False),
+        }
 
     @staticmethod
     def normalize_count(count: Any) -> dict[str, int | str]:

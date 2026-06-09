@@ -46,6 +46,7 @@ class Post:
     tag_list: list[str] = field(default_factory=list)
     ip_location: str = ""
     xsec_token: str = ""
+    listing_data: str = ""
     crawled_at: str = field(default_factory=utc_now_iso)
 
 
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS posts (
     tag_list TEXT,
     ip_location TEXT,
     xsec_token TEXT,
+    listing_data TEXT,
     crawled_at TEXT,
     FOREIGN KEY (blogger_user_id) REFERENCES bloggers(user_id)
 );
